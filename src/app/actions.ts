@@ -4,6 +4,7 @@
 // are called directly from client components as async functions.
 import Papa from "papaparse";
 import {
+  activityCountsForDay,
   activityDates,
   addDaysISO,
   addFlashcard,
@@ -12,18 +13,22 @@ import {
   bulkAddFlashcards,
   bulkAddQuestions,
   countsByTopic,
+  dailyActivity,
   deleteFlashcard,
   deleteQuestion,
   dueFlashcards,
   ensureInit,
   getFlashcardState,
   getQuestions,
+  getSettingsRaw,
   recentAttempts,
   recordAttempt,
+  setSettingsRaw,
   todayISO,
   updateCardSchedule,
 } from "@/lib/db";
 import { schedule } from "@/lib/srs";
+import { buildHeatmap, parseSettings, type HabitSettings } from "@/lib/habits";
 import { SAMPLE_CARDS, SAMPLE_QUESTIONS } from "@/lib/seed-data";
 import { TOPIC_CODES } from "@/lib/topics";
 import type {
@@ -31,6 +36,7 @@ import type {
   Flashcard,
   ImportResult,
   Question,
+  TodayData,
 } from "@/lib/types";
 
 // ---------------------------------------------------------------- dashboard
@@ -73,6 +79,55 @@ export async function getSidebarCounts(): Promise<{ due: number; questions: numb
     due: stats.reduce((a, s) => a + s.due, 0),
     questions: stats.reduce((a, s) => a + s.questions, 0),
   };
+}
+
+// ---------------------------------------------------------------- today / habits
+function daysBetween(fromISO: string, toISO: string): number {
+  const a = new Date(fromISO + "T00:00:00").getTime();
+  const b = new Date(toISO + "T00:00:00").getTime();
+  return Math.round((b - a) / 86_400_000);
+}
+
+export async function getToday(): Promise<TodayData> {
+  await ensureInit();
+  const today = todayISO();
+  const yesterday = addDaysISO(today, -1);
+
+  const settings = parseSettings(await getSettingsRaw());
+  const todayCounts = await activityCountsForDay(today);
+  const stats = await countsByTopic();
+  const days = await activityDates();
+
+  const weeks = 12;
+  const activityMap = await dailyActivity(addDaysISO(today, -(weeks * 7)));
+
+  return {
+    today,
+    settings,
+    cardsReviewedToday: todayCounts.cards,
+    questionsAnsweredToday: todayCounts.questions,
+    dueRemaining: stats.reduce((a, s) => a + s.due, 0),
+    questionsAvailable: stats.reduce((a, s) => a + s.questions, 0),
+    streak: computeStreak(days),
+    studiedToday: days.has(today),
+    missedYesterday: !days.has(yesterday),
+    totalStudyDays: days.size,
+    heatmap: buildHeatmap(today, Object.fromEntries(activityMap), weeks),
+    examDaysLeft: settings.examDate ? daysBetween(today, settings.examDate) : null,
+  };
+}
+
+export async function saveSettings(input: Partial<HabitSettings>): Promise<void> {
+  await ensureInit();
+  const entries: Record<string, string> = {};
+  if (input.identity !== undefined) entries.identity = input.identity.slice(0, 300);
+  if (input.cue !== undefined) entries.cue = input.cue.slice(0, 500);
+  if (input.examDate !== undefined) entries.examDate = input.examDate.slice(0, 10);
+  if (input.goalCards !== undefined)
+    entries.goalCards = String(Math.max(1, Math.min(500, Math.trunc(input.goalCards))));
+  if (input.goalQuestions !== undefined)
+    entries.goalQuestions = String(Math.max(0, Math.min(500, Math.trunc(input.goalQuestions))));
+  await setSettingsRaw(entries);
 }
 
 // ---------------------------------------------------------------- flashcards

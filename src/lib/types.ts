@@ -1,5 +1,6 @@
 // Shared types passed between server actions and client components.
 // Type-only module — safe to import anywhere (erased at compile time).
+import type { HabitSettings, HeatCell } from "./habits";
 
 export interface Topic {
   id: number;
@@ -74,4 +75,19 @@ export interface ImportResult {
   added: number;
   skipped: number;
   error?: string;
+}
+
+export interface TodayData {
+  today: string;
+  settings: HabitSettings;
+  cardsReviewedToday: number;
+  questionsAnsweredToday: number;
+  dueRemaining: number;
+  questionsAvailable: number;
+  streak: number;
+  studiedToday: boolean;
+  missedYesterday: boolean;
+  totalStudyDays: number;
+  heatmap: HeatCell[][];
+  examDaysLeft: number | null;
 }

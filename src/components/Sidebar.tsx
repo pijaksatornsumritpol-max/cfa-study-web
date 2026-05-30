@@ -6,7 +6,8 @@ import { useEffect, useState } from "react";
 import { getSidebarCounts } from "@/app/actions";
 
 const NAV = [
-  { href: "/", label: "Dashboard", icon: "📊" },
+  { href: "/", label: "Today", icon: "🗓️" },
+  { href: "/dashboard", label: "Dashboard", icon: "📊" },
   { href: "/flashcards", label: "Flashcards", icon: "🃏" },
   { href: "/quiz", label: "Quiz", icon: "📝" },
   { href: "/manage", label: "Manage", icon: "⚙️" },
@@ -52,7 +53,7 @@ export default function Sidebar() {
         <div className="mb-4 px-2">
           <div className="text-lg font-bold tracking-tight">📘 CFA L1 Study</div>
           <div className="text-xs text-slate-500">
-            Spaced repetition · quiz · progress
+            Daily habit · spaced repetition · quiz
           </div>
         </div>
         <nav className="flex flex-col gap-1">{links}</nav>

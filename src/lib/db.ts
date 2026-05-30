@@ -120,6 +120,10 @@ async function doInit(): Promise<void> {
       is_correct INTEGER,
       answered_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS settings (
+      key TEXT PRIMARY KEY,
+      value TEXT
+    );
   `);
 
   // Seed the 10 topics if missing. INSERT OR IGNORE keeps this idempotent and
@@ -460,4 +464,57 @@ export async function recentAttempts(limit = 20): Promise<RecentAttempt[]> {
     is_correct: num(row.is_correct),
     answered_at: str(row.answered_at),
   }));
+}
+
+// ---------------------------------------------------------------- habits
+/** Cards reviewed and questions answered on a given local day (default today). */
+export async function activityCountsForDay(
+  day = todayISO(),
+): Promise<{ cards: number; questions: number }> {
+  const [rev, att] = await client.batch(
+    [
+      { sql: "SELECT COUNT(*) AS n FROM reviews WHERE substr(reviewed_at,1,10)=?", args: [day] },
+      { sql: "SELECT COUNT(*) AS n FROM attempts WHERE substr(answered_at,1,10)=?", args: [day] },
+    ],
+    "read",
+  );
+  return { cards: num(rev.rows[0]?.n), questions: num(att.rows[0]?.n) };
+}
+
+/** Per-day activity (reviews + attempts) on/after `sinceISO`, for the heatmap. */
+export async function dailyActivity(sinceISO: string): Promise<Map<string, number>> {
+  const [rev, att] = await client.batch(
+    [
+      {
+        sql: "SELECT substr(reviewed_at,1,10) AS d, COUNT(*) AS n FROM reviews WHERE reviewed_at >= ? GROUP BY d",
+        args: [sinceISO],
+      },
+      {
+        sql: "SELECT substr(answered_at,1,10) AS d, COUNT(*) AS n FROM attempts WHERE answered_at >= ? GROUP BY d",
+        args: [sinceISO],
+      },
+    ],
+    "read",
+  );
+  const m = new Map<string, number>();
+  for (const r of [...rev.rows, ...att.rows]) {
+    const d = str(r.d);
+    if (d) m.set(d, (m.get(d) ?? 0) + num(r.n));
+  }
+  return m;
+}
+
+export async function getSettingsRaw(): Promise<Record<string, string>> {
+  const r = await client.execute("SELECT key, value FROM settings");
+  const out: Record<string, string> = {};
+  for (const row of r.rows) out[str(row.key)] = str(row.value);
+  return out;
+}
+
+export async function setSettingsRaw(entries: Record<string, string>): Promise<void> {
+  const stmts = Object.entries(entries).map(([k, v]) => ({
+    sql: "INSERT INTO settings (key, value) VALUES (?,?) ON CONFLICT(key) DO UPDATE SET value=excluded.value",
+    args: [k, v] as InValue[],
+  }));
+  if (stmts.length) await client.batch(stmts, "write");
 }
