@@ -124,6 +124,12 @@ async function doInit(): Promise<void> {
       key TEXT PRIMARY KEY,
       value TEXT
     );
+    CREATE TABLE IF NOT EXISTS explanations (
+      question_id INTEGER PRIMARY KEY REFERENCES questions(id) ON DELETE CASCADE,
+      text TEXT NOT NULL,
+      model TEXT,
+      created_at TEXT
+    );
   `);
 
   // Seed the 10 topics if missing. INSERT OR IGNORE keeps this idempotent and
@@ -517,4 +523,28 @@ export async function setSettingsRaw(entries: Record<string, string>): Promise<v
     args: [k, v] as InValue[],
   }));
   if (stmts.length) await client.batch(stmts, "write");
+}
+
+// ---------------------------------------------------------------- AI explanation cache
+export async function getExplanation(
+  questionId: number,
+): Promise<{ text: string; model: string } | null> {
+  const r = await client.execute({
+    sql: "SELECT text, model FROM explanations WHERE question_id=?",
+    args: [questionId],
+  });
+  if (!r.rows.length) return null;
+  return { text: str(r.rows[0].text), model: str(r.rows[0].model) };
+}
+
+export async function saveExplanation(
+  questionId: number,
+  text: string,
+  model: string,
+): Promise<void> {
+  await client.execute({
+    sql: `INSERT INTO explanations (question_id, text, model, created_at) VALUES (?,?,?,?)
+          ON CONFLICT(question_id) DO UPDATE SET text=excluded.text, model=excluded.model, created_at=excluded.created_at`,
+    args: [questionId, text, model, nowLocalISO()],
+  });
 }

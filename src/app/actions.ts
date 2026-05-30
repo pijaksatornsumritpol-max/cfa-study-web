@@ -18,11 +18,13 @@ import {
   deleteQuestion,
   dueFlashcards,
   ensureInit,
+  getExplanation,
   getFlashcardState,
   getQuestions,
   getSettingsRaw,
   recentAttempts,
   recordAttempt,
+  saveExplanation,
   setSettingsRaw,
   todayISO,
   updateCardSchedule,
@@ -152,30 +154,99 @@ export async function reviewCard(cardId: number, quality: number): Promise<void>
 }
 
 // ---------------------------------------------------------------- AI explain
+// Stable, frozen system prompt (no per-request data) so prompt caching can work
+// once it's long enough to cache. NOTE: Claude Haiku's minimum cacheable prefix
+// is 4096 tokens — at this short length the cache_control marker is a no-op
+// (it silently won't cache). The real cost-saver is the DB result cache below:
+// each question is explained by the API at most once, then served from SQLite.
+const EXPLAIN_SYSTEM =
+  "You are a CFA Level 1 tutor. In 3-5 sentences of plain English, explain why the correct answer is right and briefly why each other option is wrong. Focus on the underlying CFA concept. Do not restate the question.";
+
 export async function explainQuestion(
+  questionId: number,
   stem: string,
   choices: { a: string; b: string; c: string },
   correct: string,
-  chosen: string | null,
-): Promise<{ text?: string; error?: string }> {
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) {
+): Promise<{ text?: string; error?: string; cached?: boolean }> {
+  await ensureInit();
+
+  // 1. DB result cache — same question is generated once, then reused for free.
+  const hit = await getExplanation(questionId);
+  if (hit) return { text: hit.text, cached: true };
+
+  // 2. Chosen-agnostic user prompt (so the cache key is just the question).
+  const userContent = `Question: ${stem}\nA) ${choices.a}\nB) ${choices.b}\nC) ${choices.c}\nCorrect answer: ${correct}`;
+
+  // 3. Call a provider: Claude (preferred) → Gemini → none configured.
+  let result: { text?: string; error?: string };
+  let model: string;
+  if (process.env.ANTHROPIC_API_KEY) {
+    model = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
+    result = await callClaude(process.env.ANTHROPIC_API_KEY, model, userContent);
+  } else if (process.env.GEMINI_API_KEY) {
+    model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+    result = await callGemini(process.env.GEMINI_API_KEY, model, userContent);
+  } else {
     return {
       error:
-        "AI explanations aren’t set up yet. Add a free GEMINI_API_KEY (from aistudio.google.com) as an environment variable.",
+        "AI explanations aren’t set up yet. Add an ANTHROPIC_API_KEY (or GEMINI_API_KEY) environment variable.",
     };
   }
-  const model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
-  const wrongNote =
-    chosen && chosen !== correct ? ", and briefly why the student’s choice is wrong" : "";
-  const prompt = `You are a CFA Level 1 tutor. In 3-5 sentences of plain English, explain why the correct answer is right${wrongNote}. Focus on the underlying CFA concept being tested. Do not restate the question verbatim.
 
-Question: ${stem}
-A) ${choices.a}
-B) ${choices.b}
-C) ${choices.c}
-Correct answer: ${correct}${chosen ? `\nStudent chose: ${chosen}` : ""}`;
+  // 4. Persist on success so the next request for this question is free.
+  if (result.text) {
+    await saveExplanation(questionId, result.text, model);
+    return { text: result.text, cached: false };
+  }
+  return { error: result.error };
+}
 
+async function callClaude(
+  key: string,
+  model: string,
+  userContent: string,
+): Promise<{ text?: string; error?: string }> {
+  try {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-api-key": key,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model,
+        max_tokens: 500,
+        system: [
+          { type: "text", text: EXPLAIN_SYSTEM, cache_control: { type: "ephemeral" } },
+        ],
+        messages: [{ role: "user", content: userContent }],
+      }),
+    });
+    if (!res.ok) {
+      const detail = (await res.text()).slice(0, 200);
+      return { error: `Claude request failed (${res.status}). ${detail}` };
+    }
+    const data = (await res.json()) as {
+      content?: { type: string; text?: string }[];
+    };
+    const text = data.content
+      ?.filter((b) => b.type === "text")
+      .map((b) => b.text ?? "")
+      .join("")
+      .trim();
+    if (!text) return { error: "Claude returned an empty response — try again." };
+    return { text };
+  } catch (e) {
+    return { error: "Could not reach Claude. " + String(e).slice(0, 150) };
+  }
+}
+
+async function callGemini(
+  key: string,
+  model: string,
+  userContent: string,
+): Promise<{ text?: string; error?: string }> {
   try {
     const res = await fetch(
       `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
@@ -183,7 +254,8 @@ Correct answer: ${correct}${chosen ? `\nStudent chose: ${chosen}` : ""}`;
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }] }],
+          systemInstruction: { parts: [{ text: EXPLAIN_SYSTEM }] },
+          contents: [{ parts: [{ text: userContent }] }],
           generationConfig: { temperature: 0.3, maxOutputTokens: 500 },
         }),
       },

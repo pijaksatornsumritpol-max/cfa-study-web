@@ -25,7 +25,7 @@ export default function QuizPage() {
   const [starting, setStarting] = useState(false);
   const [warn, setWarn] = useState("");
   const [ai, setAi] = useState<
-    Record<number, { loading?: boolean; text?: string; error?: string }>
+    Record<number, { loading?: boolean; text?: string; error?: string; cached?: boolean }>
   >({});
 
   // Celebrate finishing a quiz (bigger burst for a strong score).
@@ -192,10 +192,10 @@ export default function QuizPage() {
     if (ai[idx]?.text || ai[idx]?.loading) return;
     setAi((m) => ({ ...m, [idx]: { loading: true } }));
     const res = await explainQuestion(
+      q.id,
       q.stem,
       { a: q.choice_a, b: q.choice_b, c: q.choice_c },
       q.correct,
-      chosen ?? null,
     );
     setAi((m) => ({ ...m, [idx]: { loading: false, ...res } }));
   }
@@ -291,7 +291,7 @@ export default function QuizPage() {
               {ai[idx]?.text && (
                 <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-sm text-slate-700">
                   <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-indigo-500">
-                    🤖 AI explanation
+                    🤖 AI explanation{ai[idx]?.cached ? " · ⚡ cached" : ""}
                   </div>
                   <p className="whitespace-pre-wrap">{ai[idx]?.text}</p>
                 </div>
