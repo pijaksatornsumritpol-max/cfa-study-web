@@ -1,8 +1,9 @@
 "use client";
 
-import { useState } from "react";
-import { getQuiz, submitAnswer } from "@/app/actions";
+import { useEffect, useState } from "react";
+import { explainQuestion, getQuiz, submitAnswer } from "@/app/actions";
 import { btnPrimary, btnSecondary, PageTitle, TopicSelect } from "@/components/ui";
+import { celebrate } from "@/lib/confetti";
 import { CODE_TO_NAME } from "@/lib/topics";
 import type { Question } from "@/lib/types";
 
@@ -23,6 +24,17 @@ export default function QuizPage() {
   const [done, setDone] = useState(false);
   const [starting, setStarting] = useState(false);
   const [warn, setWarn] = useState("");
+  const [ai, setAi] = useState<
+    Record<number, { loading?: boolean; text?: string; error?: string }>
+  >({});
+
+  // Celebrate finishing a quiz (bigger burst for a strong score).
+  useEffect(() => {
+    if (done && quiz) {
+      const ratio = quiz.correct / quiz.questions.length;
+      celebrate({ particles: ratio >= 0.8 ? 260 : 160 });
+    }
+  }, [done]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function start() {
     setStarting(true);
@@ -176,6 +188,18 @@ export default function QuizPage() {
     );
   }
 
+  async function explain() {
+    if (ai[idx]?.text || ai[idx]?.loading) return;
+    setAi((m) => ({ ...m, [idx]: { loading: true } }));
+    const res = await explainQuestion(
+      q.stem,
+      { a: q.choice_a, b: q.choice_b, c: q.choice_c },
+      q.correct,
+      chosen ?? null,
+    );
+    setAi((m) => ({ ...m, [idx]: { loading: false, ...res } }));
+  }
+
   return (
     <>
       <PageTitle>📝 Quiz</PageTitle>
@@ -253,6 +277,28 @@ export default function QuizPage() {
                 {q.explanation}
               </div>
             )}
+
+            <div className="mt-3">
+              {!ai[idx]?.text && !ai[idx]?.loading && (
+                <button
+                  onClick={explain}
+                  className="text-sm font-semibold text-indigo-600 hover:text-indigo-700"
+                >
+                  🤖 Explain with AI
+                </button>
+              )}
+              {ai[idx]?.loading && <p className="text-sm text-slate-500">🤖 Thinking…</p>}
+              {ai[idx]?.text && (
+                <div className="rounded-lg border border-indigo-100 bg-indigo-50 p-3 text-sm text-slate-700">
+                  <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-indigo-500">
+                    🤖 AI explanation
+                  </div>
+                  <p className="whitespace-pre-wrap">{ai[idx]?.text}</p>
+                </div>
+              )}
+              {ai[idx]?.error && <p className="text-sm text-amber-600">{ai[idx]?.error}</p>}
+            </div>
+
             <div className="mt-5 flex flex-wrap gap-2">
               {idx > 0 && (
                 <button onClick={() => go(-1)} className={btnSecondary}>

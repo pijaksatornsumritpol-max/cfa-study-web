@@ -122,6 +122,7 @@ export async function saveSettings(input: Partial<HabitSettings>): Promise<void>
   const entries: Record<string, string> = {};
   if (input.identity !== undefined) entries.identity = input.identity.slice(0, 300);
   if (input.cue !== undefined) entries.cue = input.cue.slice(0, 500);
+  if (input.reward !== undefined) entries.reward = input.reward.slice(0, 300);
   if (input.examDate !== undefined) entries.examDate = input.examDate.slice(0, 10);
   if (input.goalCards !== undefined)
     entries.goalCards = String(Math.max(1, Math.min(500, Math.trunc(input.goalCards))));
@@ -148,6 +149,61 @@ export async function reviewCard(cardId: number, quality: number): Promise<void>
   );
   const due = addDaysISO(todayISO(), interval);
   await updateCardSchedule(cardId, ease, interval, reps, due, quality);
+}
+
+// ---------------------------------------------------------------- AI explain
+export async function explainQuestion(
+  stem: string,
+  choices: { a: string; b: string; c: string },
+  correct: string,
+  chosen: string | null,
+): Promise<{ text?: string; error?: string }> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) {
+    return {
+      error:
+        "AI explanations aren’t set up yet. Add a free GEMINI_API_KEY (from aistudio.google.com) as an environment variable.",
+    };
+  }
+  const model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
+  const wrongNote =
+    chosen && chosen !== correct ? ", and briefly why the student’s choice is wrong" : "";
+  const prompt = `You are a CFA Level 1 tutor. In 3-5 sentences of plain English, explain why the correct answer is right${wrongNote}. Focus on the underlying CFA concept being tested. Do not restate the question verbatim.
+
+Question: ${stem}
+A) ${choices.a}
+B) ${choices.b}
+C) ${choices.c}
+Correct answer: ${correct}${chosen ? `\nStudent chose: ${chosen}` : ""}`;
+
+  try {
+    const res = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+      {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: { temperature: 0.3, maxOutputTokens: 500 },
+        }),
+      },
+    );
+    if (!res.ok) {
+      const detail = (await res.text()).slice(0, 200);
+      return { error: `AI request failed (${res.status}). ${detail}` };
+    }
+    const data = (await res.json()) as {
+      candidates?: { content?: { parts?: { text?: string }[] } }[];
+    };
+    const text = data.candidates?.[0]?.content?.parts
+      ?.map((p) => p.text ?? "")
+      .join("")
+      .trim();
+    if (!text) return { error: "AI returned an empty response — try again." };
+    return { text };
+  } catch (e) {
+    return { error: "Could not reach the AI service. " + String(e).slice(0, 150) };
+  }
 }
 
 // ---------------------------------------------------------------- quiz

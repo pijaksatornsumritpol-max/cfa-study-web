@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getDueCards, reviewCard } from "@/app/actions";
 import { btnSecondary, PageTitle, TopicSelect } from "@/components/ui";
+import { celebrate } from "@/lib/confetti";
 import { intervalPreview, QUALITY, type Rating } from "@/lib/srs";
 import { CODE_TO_NAME } from "@/lib/topics";
 import type { Flashcard } from "@/lib/types";
@@ -36,6 +37,7 @@ export default function FlashcardsPage() {
 
   async function rate(rating: Rating) {
     if (!card || busy) return;
+    const wasLast = (queue?.length ?? 0) <= 1;
     setBusy(true);
     try {
       await reviewCard(card.id, QUALITY[rating]);
@@ -44,6 +46,7 @@ export default function FlashcardsPage() {
     }
     setQueue((q) => (q ? q.slice(1) : q));
     setShow(false);
+    if (wasLast) celebrate(); // cleared the due queue 🎉
   }
 
   return (

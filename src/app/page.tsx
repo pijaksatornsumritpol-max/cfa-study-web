@@ -4,8 +4,11 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { getToday, saveSettings } from "@/app/actions";
 import { btnPrimary, btnSecondary } from "@/components/ui";
+import { celebrate } from "@/lib/confetti";
 import { compounding, type HabitSettings } from "@/lib/habits";
 import type { TodayData } from "@/lib/types";
+
+const STREAK_MILESTONES = [3, 7, 14, 21, 30, 50, 75, 100, 150, 200, 250, 300, 365];
 
 export default function TodayPage() {
   const [data, setData] = useState<TodayData | null>(null);
@@ -15,6 +18,28 @@ export default function TodayPage() {
   useEffect(() => {
     load();
   }, []);
+
+  // Make it satisfying: fire confetti once when the daily goal is hit, and on
+  // streak milestones. localStorage keys keep each celebration to one per event.
+  useEffect(() => {
+    if (!data) return;
+    const cardsMet = data.cardsReviewedToday >= data.settings.goalCards;
+    const questionsMet = data.questionsAnsweredToday >= data.settings.goalQuestions;
+    if (cardsMet && questionsMet) {
+      const key = `cfa-celebrated-${data.today}`;
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, "1");
+        celebrate();
+      }
+    }
+    if (STREAK_MILESTONES.includes(data.streak)) {
+      const key = `cfa-streak-${data.streak}`;
+      if (!localStorage.getItem(key)) {
+        localStorage.setItem(key, "1");
+        celebrate({ particles: 240 });
+      }
+    }
+  }, [data]);
 
   if (!data) return <Skeleton />;
 
@@ -114,6 +139,15 @@ export default function TodayPage() {
             )}
           </div>
         </div>
+
+        {s.reward && (
+          <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+            {dayComplete
+              ? "🎉 You earned it — enjoy: "
+              : "🍿 Reward waiting · finish today’s goal, then "}
+            <strong>{s.reward}</strong>
+          </div>
+        )}
 
         {emptyBank ? (
           <div className="mt-4 rounded-lg bg-slate-50 p-3 text-sm text-slate-600">
@@ -321,6 +355,7 @@ function CustomizePanel({
 }) {
   const [identity, setIdentity] = useState(settings.identity);
   const [cue, setCue] = useState(settings.cue);
+  const [reward, setReward] = useState(settings.reward);
   const [goalCards, setGoalCards] = useState(settings.goalCards);
   const [goalQuestions, setGoalQuestions] = useState(settings.goalQuestions);
   const [examDate, setExamDate] = useState(settings.examDate);
@@ -329,7 +364,7 @@ function CustomizePanel({
   async function save() {
     setBusy(true);
     try {
-      await saveSettings({ identity, cue, goalCards, goalQuestions, examDate });
+      await saveSettings({ identity, cue, reward, goalCards, goalQuestions, examDate });
       onSaved();
     } finally {
       setBusy(false);
@@ -357,6 +392,17 @@ function CustomizePanel({
           value={cue}
           onChange={(e) => setCue(e.target.value)}
           placeholder="After ___, I will review CFA cards at ___."
+          className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+        />
+      </div>
+      <div>
+        <label className="mb-1 block text-xs font-medium text-slate-500">
+          Temptation bundle — reward after you finish (make it attractive)
+        </label>
+        <input
+          value={reward}
+          onChange={(e) => setReward(e.target.value)}
+          placeholder="e.g. one episode of my show · iced latte · 20 min gaming"
           className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
         />
       </div>

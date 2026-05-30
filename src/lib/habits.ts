@@ -6,6 +6,7 @@ export interface HabitSettings {
   goalCards: number; // daily system target (cards)
   goalQuestions: number; // daily system target (questions)
   cue: string; // implementation intention / habit stack
+  reward: string; // temptation bundling — "after I study, I get to ___"
   examDate: string; // optional "YYYY-MM-DD" for systems-vs-goals framing
 }
 
@@ -14,6 +15,7 @@ export const DEFAULT_SETTINGS: HabitSettings = {
   goalCards: 10,
   goalQuestions: 5,
   cue: "",
+  reward: "",
   examDate: "",
 };
 
@@ -24,6 +26,7 @@ export function parseSettings(raw: Record<string, string>): HabitSettings {
     goalCards: clampInt(raw.goalCards, DEFAULT_SETTINGS.goalCards, 1, 500),
     goalQuestions: clampInt(raw.goalQuestions, DEFAULT_SETTINGS.goalQuestions, 0, 500),
     cue: raw.cue ?? "",
+    reward: raw.reward ?? "",
     examDate: raw.examDate ?? "",
   };
 }
