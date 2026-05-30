@@ -30,7 +30,19 @@ globalForDb._cfaClient = client;
 // ---------------------------------------------------------------- dates
 // Compute "today" and timestamps in the user's timezone so due-dates and
 // streaks line up with their local day, regardless of the server's timezone.
-const APP_TZ = process.env.APP_TZ || "Asia/Bangkok";
+// Trim + validate so a stray space/tab or typo in the APP_TZ env var can never
+// crash the app (falls back to Asia/Bangkok).
+const APP_TZ = resolveTimeZone(process.env.APP_TZ);
+
+function resolveTimeZone(raw: string | undefined): string {
+  const tz = (raw || "Asia/Bangkok").trim();
+  try {
+    new Intl.DateTimeFormat("en-CA", { timeZone: tz });
+    return tz;
+  } catch {
+    return "Asia/Bangkok";
+  }
+}
 
 export function todayISO(): string {
   // en-CA formats as YYYY-MM-DD
