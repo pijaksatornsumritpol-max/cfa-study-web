@@ -32,10 +32,13 @@ import {
 import { schedule } from "@/lib/srs";
 import { buildHeatmap, parseSettings, type HabitSettings } from "@/lib/habits";
 import { SAMPLE_CARDS, SAMPLE_QUESTIONS } from "@/lib/seed-data";
-import { TOPIC_CODES } from "@/lib/topics";
+import { CODE_TO_NAME, TOPIC_CODES } from "@/lib/topics";
 import type {
   DashboardData,
   Flashcard,
+  GenCard,
+  GenQuestion,
+  GenResult,
   ImportResult,
   Question,
   TodayData,
@@ -182,10 +185,10 @@ export async function explainQuestion(
   let model: string;
   if (process.env.ANTHROPIC_API_KEY) {
     model = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
-    result = await callClaude(process.env.ANTHROPIC_API_KEY, model, userContent);
+    result = await callClaude(process.env.ANTHROPIC_API_KEY, model, userContent, EXPLAIN_SYSTEM, 500);
   } else if (process.env.GEMINI_API_KEY) {
     model = process.env.GEMINI_MODEL || "gemini-2.0-flash";
-    result = await callGemini(process.env.GEMINI_API_KEY, model, userContent);
+    result = await callGemini(process.env.GEMINI_API_KEY, model, userContent, EXPLAIN_SYSTEM, 500);
   } else {
     return {
       error:
@@ -205,6 +208,8 @@ async function callClaude(
   key: string,
   model: string,
   userContent: string,
+  system: string,
+  maxTokens: number,
 ): Promise<{ text?: string; error?: string }> {
   try {
     const res = await fetch("https://api.anthropic.com/v1/messages", {
@@ -216,9 +221,9 @@ async function callClaude(
       },
       body: JSON.stringify({
         model,
-        max_tokens: 500,
+        max_tokens: maxTokens,
         system: [
-          { type: "text", text: EXPLAIN_SYSTEM, cache_control: { type: "ephemeral" } },
+          { type: "text", text: system, cache_control: { type: "ephemeral" } },
         ],
         messages: [{ role: "user", content: userContent }],
       }),
@@ -246,6 +251,8 @@ async function callGemini(
   key: string,
   model: string,
   userContent: string,
+  system: string,
+  maxTokens: number,
 ): Promise<{ text?: string; error?: string }> {
   try {
     const res = await fetch(
@@ -254,9 +261,9 @@ async function callGemini(
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: EXPLAIN_SYSTEM }] },
+          systemInstruction: { parts: [{ text: system }] },
           contents: [{ parts: [{ text: userContent }] }],
-          generationConfig: { temperature: 0.3, maxOutputTokens: 500 },
+          generationConfig: { temperature: 0.3, maxOutputTokens: maxTokens },
         }),
       },
     );
@@ -276,6 +283,147 @@ async function callGemini(
   } catch (e) {
     return { error: "Could not reach the AI service. " + String(e).slice(0, 150) };
   }
+}
+
+// ---------------------------------------------------------------- AI generate
+function genSystem(topicName: string): string {
+  return `You are a CFA Level 1 exam tutor and question writer. From the user's study text, write high-quality, exam-style study material for the topic "${topicName}". Base everything strictly on the provided text — do not invent facts it does not support. Flashcards: a concise front (a question, term, or "what is X?") and a back (the answer, definition, or formula). Multiple-choice questions: a clear stem, exactly three options A/B/C with one correct answer, and a one-sentence explanation. Respond with ONLY a JSON object (no markdown fences, no prose) of the form {"flashcards":[{"front":"","back":"","tags":""}],"questions":[{"stem":"","choice_a":"","choice_b":"","choice_c":"","correct":"A","explanation":""}]}. "correct" must be "A", "B", or "C". "tags" is a short comma-separated string and may be empty.`;
+}
+
+export async function generateFromText(
+  code: string,
+  text: string,
+  nCards: number,
+  nQuestions: number,
+): Promise<GenResult> {
+  await ensureInit();
+  if (!TOPIC_CODES.includes(code))
+    return { flashcards: [], questions: [], error: "Pick a valid topic first." };
+  const clean = text.trim().slice(0, 24000); // ~6k-token cap to bound cost/latency
+  if (clean.length < 50)
+    return { flashcards: [], questions: [], error: "Paste more study text (at least a paragraph)." };
+  const nc = Math.max(0, Math.min(20, Math.trunc(nCards)));
+  const nq = Math.max(0, Math.min(20, Math.trunc(nQuestions)));
+  if (nc + nq === 0)
+    return { flashcards: [], questions: [], error: "Ask for at least one card or question." };
+
+  const system = genSystem(CODE_TO_NAME[code] ?? code);
+  const user = `Create ${nc} flashcards and ${nq} multiple-choice questions from this study text:\n\n${clean}`;
+
+  let result: { text?: string; error?: string };
+  if (process.env.ANTHROPIC_API_KEY) {
+    result = await callClaude(
+      process.env.ANTHROPIC_API_KEY,
+      process.env.ANTHROPIC_MODEL || "claude-haiku-4-5",
+      user,
+      system,
+      4096,
+    );
+  } else if (process.env.GEMINI_API_KEY) {
+    result = await callGemini(
+      process.env.GEMINI_API_KEY,
+      process.env.GEMINI_MODEL || "gemini-2.0-flash",
+      user,
+      system,
+      4096,
+    );
+  } else {
+    return {
+      flashcards: [],
+      questions: [],
+      error: "AI isn’t set up. Add an ANTHROPIC_API_KEY (or GEMINI_API_KEY) environment variable.",
+    };
+  }
+  if (!result.text) return { flashcards: [], questions: [], error: result.error };
+
+  const parsed = parseLooseJson(result.text);
+  if (!parsed)
+    return { flashcards: [], questions: [], error: "The AI response couldn’t be parsed — try again." };
+  const flashcards = sanitizeCards(parsed.flashcards);
+  const questions = sanitizeQuestions(parsed.questions);
+  if (!flashcards.length && !questions.length)
+    return {
+      flashcards: [],
+      questions: [],
+      error: "The AI didn’t return usable items — try again or paste more text.",
+    };
+  return { flashcards, questions };
+}
+
+export async function saveGenerated(
+  code: string,
+  flashcards: GenCard[],
+  questions: GenQuestion[],
+): Promise<{ cards: number; questions: number }> {
+  await ensureInit();
+  if (!TOPIC_CODES.includes(code)) return { cards: 0, questions: 0 };
+  const cards = await bulkAddFlashcards(
+    flashcards
+      .filter((f) => f.front.trim() && f.back.trim())
+      .map((f) => ({ code, front: f.front, back: f.back, tags: f.tags })),
+  );
+  const qs = await bulkAddQuestions(
+    questions
+      .filter((q) => q.stem.trim() && ["A", "B", "C"].includes(q.correct))
+      .map((q) => ({
+        code,
+        stem: q.stem,
+        a: q.choice_a,
+        b: q.choice_b,
+        c: q.choice_c,
+        correct: q.correct,
+        explanation: q.explanation,
+      })),
+  );
+  return { cards, questions: qs };
+}
+
+function parseLooseJson(raw: string): { flashcards?: unknown; questions?: unknown } | null {
+  let s = raw.trim();
+  s = s.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();
+  const start = s.indexOf("{");
+  const end = s.lastIndexOf("}");
+  if (start >= 0 && end > start) s = s.slice(start, end + 1);
+  try {
+    return JSON.parse(s) as { flashcards?: unknown; questions?: unknown };
+  } catch {
+    return null;
+  }
+}
+
+function sanitizeCards(v: unknown): GenCard[] {
+  if (!Array.isArray(v)) return [];
+  const out: GenCard[] = [];
+  for (const it of v) {
+    if (it && typeof it === "object") {
+      const o = it as Record<string, unknown>;
+      const front = String(o.front ?? "").trim();
+      const back = String(o.back ?? "").trim();
+      const tags = String(o.tags ?? "").trim();
+      if (front && back) out.push({ front, back, tags });
+    }
+  }
+  return out;
+}
+
+function sanitizeQuestions(v: unknown): GenQuestion[] {
+  if (!Array.isArray(v)) return [];
+  const out: GenQuestion[] = [];
+  for (const it of v) {
+    if (it && typeof it === "object") {
+      const o = it as Record<string, unknown>;
+      const stem = String(o.stem ?? "").trim();
+      const a = String(o.choice_a ?? "").trim();
+      const b = String(o.choice_b ?? "").trim();
+      const c = String(o.choice_c ?? "").trim();
+      const correct = String(o.correct ?? "").trim().toUpperCase();
+      const explanation = String(o.explanation ?? "").trim();
+      if (stem && a && b && c && (correct === "A" || correct === "B" || correct === "C")) {
+        out.push({ stem, choice_a: a, choice_b: b, choice_c: c, correct, explanation });
+      }
+    }
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------- quiz

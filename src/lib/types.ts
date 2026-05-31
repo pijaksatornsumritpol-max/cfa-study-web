@@ -77,6 +77,28 @@ export interface ImportResult {
   error?: string;
 }
 
+// AI-generated content (previewed before saving).
+export interface GenCard {
+  front: string;
+  back: string;
+  tags: string;
+}
+
+export interface GenQuestion {
+  stem: string;
+  choice_a: string;
+  choice_b: string;
+  choice_c: string;
+  correct: "A" | "B" | "C";
+  explanation: string;
+}
+
+export interface GenResult {
+  flashcards: GenCard[];
+  questions: GenQuestion[];
+  error?: string;
+}
+
 export interface TodayData {
   today: string;
   settings: HabitSettings;

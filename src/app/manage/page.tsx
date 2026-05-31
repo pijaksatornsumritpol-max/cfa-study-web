@@ -6,19 +6,22 @@ import {
   addQuiz,
   browseCards,
   browseQuestions,
+  generateFromText,
   importCardsCsv,
   importQuestionsCsv,
   removeCard,
   removeQuestion,
+  saveGenerated,
   seedSamples,
 } from "@/app/actions";
 import { btnPrimary, btnSecondary, PageTitle, TopicSelect } from "@/components/ui";
 import { TOPIC_CODES } from "@/lib/topics";
-import type { Flashcard, ImportResult, Question } from "@/lib/types";
+import type { Flashcard, GenCard, GenQuestion, ImportResult, Question } from "@/lib/types";
 
-type Tab = "card" | "question" | "import" | "browse";
+type Tab = "generate" | "card" | "question" | "import" | "browse";
 
 const TABS: { id: Tab; label: string }[] = [
+  { id: "generate", label: "✨ Generate with AI" },
   { id: "card", label: "➕ Add flashcard" },
   { id: "question", label: "➕ Add question" },
   { id: "import", label: "📥 Import CSV" },
@@ -26,7 +29,7 @@ const TABS: { id: Tab; label: string }[] = [
 ];
 
 export default function ManagePage() {
-  const [tab, setTab] = useState<Tab>("card");
+  const [tab, setTab] = useState<Tab>("generate");
   return (
     <>
       <PageTitle>⚙️ Manage content</PageTitle>
@@ -46,11 +49,203 @@ export default function ManagePage() {
         ))}
       </div>
 
+      {tab === "generate" && <Generate />}
       {tab === "card" && <AddCard />}
       {tab === "question" && <AddQuestion />}
       {tab === "import" && <ImportCsv />}
       {tab === "browse" && <Browse />}
     </>
+  );
+}
+
+// ---------------------------------------------------------------- generate with AI
+function Generate() {
+  const [topic, setTopic] = useState("ETH");
+  const [text, setText] = useState("");
+  const [nCards, setNCards] = useState(8);
+  const [nQuestions, setNQuestions] = useState(5);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [cards, setCards] = useState<GenCard[]>([]);
+  const [questions, setQuestions] = useState<GenQuestion[]>([]);
+
+  async function generate() {
+    setBusy(true);
+    setMsg(null);
+    setCards([]);
+    setQuestions([]);
+    try {
+      const res = await generateFromText(topic, text, nCards, nQuestions);
+      if (res.error) {
+        setMsg({ ok: false, text: res.error });
+      } else {
+        setCards(res.flashcards);
+        setQuestions(res.questions);
+        setMsg({
+          ok: true,
+          text: `Generated ${res.flashcards.length} flashcards and ${res.questions.length} questions — review below, then save.`,
+        });
+      }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function save() {
+    setBusy(true);
+    try {
+      const r = await saveGenerated(topic, cards, questions);
+      setMsg({ ok: true, text: `Saved ${r.cards} flashcards and ${r.questions} questions to ${topic}. ✅` });
+      setCards([]);
+      setQuestions([]);
+      setText("");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const total = cards.length + questions.length;
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <p className="text-sm text-slate-600">
+          Paste study text — a chapter, a section, or your notes — and AI turns it into
+          flashcards and quiz questions for the topic you pick. You review everything before
+          it’s saved.
+        </p>
+        <div className="grid gap-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
+          <Field label="Topic">
+            <TopicSelect value={topic} onChange={setTopic} includeAll={false} />
+          </Field>
+          <Field label="# Flashcards">
+            <input
+              type="number"
+              min={0}
+              max={20}
+              value={nCards}
+              onChange={(e) => setNCards(Math.max(0, Math.min(20, Number(e.target.value) || 0)))}
+              className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          </Field>
+          <Field label="# Questions">
+            <input
+              type="number"
+              min={0}
+              max={20}
+              value={nQuestions}
+              onChange={(e) => setNQuestions(Math.max(0, Math.min(20, Number(e.target.value) || 0)))}
+              className="w-24 rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+            />
+          </Field>
+        </div>
+        <Field label="Study text">
+          <textarea
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            rows={8}
+            placeholder="Paste a chapter, section, or your notes here…"
+            className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
+          />
+        </Field>
+        <div className="flex items-center gap-3">
+          <button onClick={generate} disabled={busy || !text.trim()} className={btnPrimary}>
+            {busy ? "Generating…" : "✨ Generate"}
+          </button>
+          {msg && (
+            <span className={`text-sm ${msg.ok ? "text-emerald-700" : "text-amber-600"}`}>
+              {msg.text}
+            </span>
+          )}
+        </div>
+      </Card>
+
+      {total > 0 && (
+        <Card>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h3 className="font-semibold text-slate-900">Preview · {total} items</h3>
+            <div className="flex gap-2">
+              <button onClick={save} disabled={busy} className={btnPrimary}>
+                {busy ? "Saving…" : `Save to ${topic}`}
+              </button>
+              <button
+                onClick={() => {
+                  setCards([]);
+                  setQuestions([]);
+                }}
+                className={btnSecondary}
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+
+          {cards.length > 0 && (
+            <div className="mt-4">
+              <div className="mb-2 text-xs font-semibold uppercase text-slate-500">
+                Flashcards ({cards.length})
+              </div>
+              <div className="space-y-2">
+                {cards.map((c, i) => (
+                  <div key={i} className="rounded-lg border border-slate-200 p-3 text-sm">
+                    <div className="flex justify-between gap-2">
+                      <div className="font-medium text-slate-800">{c.front}</div>
+                      <button
+                        onClick={() => setCards(cards.filter((_, j) => j !== i))}
+                        className="shrink-0 text-slate-400 hover:text-rose-600"
+                        title="Remove"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <div className="mt-1 text-slate-600">{c.back}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {questions.length > 0 && (
+            <div className="mt-4">
+              <div className="mb-2 text-xs font-semibold uppercase text-slate-500">
+                Questions ({questions.length})
+              </div>
+              <div className="space-y-2">
+                {questions.map((q, i) => (
+                  <div key={i} className="rounded-lg border border-slate-200 p-3 text-sm">
+                    <div className="flex justify-between gap-2">
+                      <div className="font-medium text-slate-800">{q.stem}</div>
+                      <button
+                        onClick={() => setQuestions(questions.filter((_, j) => j !== i))}
+                        className="shrink-0 text-slate-400 hover:text-rose-600"
+                        title="Remove"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                    <ul className="mt-1 space-y-0.5 text-slate-600">
+                      {(["A", "B", "C"] as const).map((L) => {
+                        const txt = L === "A" ? q.choice_a : L === "B" ? q.choice_b : q.choice_c;
+                        const ok = q.correct === L;
+                        return (
+                          <li key={L} className={ok ? "font-semibold text-emerald-700" : ""}>
+                            {L}. {txt}
+                            {ok ? " ✓" : ""}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {q.explanation && (
+                      <div className="mt-1 text-xs text-slate-500">{q.explanation}</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </Card>
+      )}
+    </div>
   );
 }
 
