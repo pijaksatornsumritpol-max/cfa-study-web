@@ -5,6 +5,11 @@
   --foreground: #0f172a; /* slate-900 */
 }
 
+.dark {
+  --background: #0b1120; /* deep slate */
+  --foreground: #e2e8f0;
+}
+
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
@@ -21,4 +26,75 @@ body {
 /* Thin, unobtrusive scrollbars */
 * {
   scrollbar-width: thin;
+}
+
+/* -------------------------------------------------------------------------
+   Dark mode — remap the app's slate/indigo utility palette when <html> has
+   the .dark class. Higher specificity (.dark .x) overrides the base utility,
+   so no per-component edits are needed.
+   ------------------------------------------------------------------------- */
+.dark .bg-white { background-color: #18212f; }
+.dark .bg-slate-50 { background-color: #0f1828; }
+.dark .bg-slate-100 { background-color: #1e293b; }
+.dark .bg-slate-200 { background-color: #334155; }
+
+.dark .text-slate-900 { color: #f1f5f9; }
+.dark .text-slate-800 { color: #e2e8f0; }
+.dark .text-slate-700 { color: #cbd5e1; }
+.dark .text-slate-600 { color: #cbd5e1; }
+.dark .text-slate-500 { color: #94a3b8; }
+.dark .text-slate-400 { color: #6b7a90; }
+
+.dark .border-slate-100 { border-color: #243044; }
+.dark .border-slate-200 { border-color: #2a3650; }
+.dark .border-slate-300 { border-color: #3b4a64; }
+.dark .divide-slate-100 > :not([hidden]) ~ :not([hidden]) { border-color: #243044; }
+
+/* Form controls */
+.dark input,
+.dark textarea,
+.dark select {
+  background-color: #18212f;
+  color: #e2e8f0;
+  border-color: #3b4a64;
+}
+.dark input::placeholder,
+.dark textarea::placeholder {
+  color: #64748b;
+}
+
+/* Soft accent backgrounds → translucent on dark */
+.dark .bg-indigo-50 { background-color: rgba(99, 102, 241, 0.14); }
+.dark .bg-indigo-100 { background-color: rgba(99, 102, 241, 0.22); }
+.dark .bg-emerald-50 { background-color: rgba(16, 185, 129, 0.13); }
+.dark .bg-emerald-100 { background-color: rgba(16, 185, 129, 0.2); }
+.dark .bg-amber-50 { background-color: rgba(245, 158, 11, 0.13); }
+.dark .bg-rose-50 { background-color: rgba(244, 63, 94, 0.13); }
+
+/* Accent text → lighten for contrast */
+.dark .text-indigo-700,
+.dark .text-indigo-600,
+.dark .text-indigo-500 { color: #a5b4fc; }
+.dark .text-emerald-700,
+.dark .text-emerald-800 { color: #6ee7b7; }
+.dark .text-amber-900,
+.dark .text-amber-600 { color: #fcd34d; }
+.dark .text-rose-800,
+.dark .text-rose-700,
+.dark .text-rose-600 { color: #fca5a5; }
+
+/* Accent borders / rings → soften */
+.dark .border-indigo-100 { border-color: rgba(99, 102, 241, 0.3); }
+.dark .border-indigo-200 { border-color: rgba(99, 102, 241, 0.4); }
+.dark .border-amber-200 { border-color: rgba(245, 158, 11, 0.35); }
+.dark .border-amber-300 { border-color: rgba(245, 158, 11, 0.45); }
+.dark .border-emerald-100 { border-color: rgba(16, 185, 129, 0.3); }
+.dark .border-emerald-300 { border-color: rgba(16, 185, 129, 0.45); }
+.dark .border-rose-200 { border-color: rgba(244, 63, 94, 0.35); }
+.dark .ring-indigo-100 { --tw-ring-color: rgba(99, 102, 241, 0.3); }
+
+/* The Today identity banner uses a gradient → flatten on dark */
+.dark .bg-gradient-to-br {
+  background-image: none;
+  background-color: rgba(99, 102, 241, 0.1);
 }

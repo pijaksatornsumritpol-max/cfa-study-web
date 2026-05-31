@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { getSidebarCounts } from "@/app/actions";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const NAV = [
   { href: "/", label: "Today", icon: "🗓️" },
@@ -60,8 +61,11 @@ export default function Sidebar() {
         <div className="mt-auto space-y-2 pt-4">
           <Metric label="Cards due today" value={counts?.due} accent="indigo" />
           <Metric label="Questions in bank" value={counts?.questions} accent="slate" />
-          <p className="px-1 pt-2 text-[11px] leading-snug text-slate-400">
-            Tip: import your book/exercise content in Manage → Import CSV.
+          <div className="pt-2">
+            <ThemeToggle className="w-full justify-center" />
+          </div>
+          <p className="px-1 pt-1 text-[11px] leading-snug text-slate-400">
+            Tip: paste or upload your content in Manage → Generate with AI.
           </p>
         </div>
       </aside>
@@ -70,8 +74,11 @@ export default function Sidebar() {
       <header className="md:hidden sticky top-0 z-10 border-b border-slate-200 bg-white">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="font-bold">📘 CFA L1</div>
-          <div className="text-xs text-slate-500">
-            Due <span className="font-semibold text-indigo-600">{counts?.due ?? "—"}</span>
+          <div className="flex items-center gap-3">
+            <span className="text-xs text-slate-500">
+              Due <span className="font-semibold text-indigo-600">{counts?.due ?? "—"}</span>
+            </span>
+            <ThemeToggle />
           </div>
         </div>
         <nav className="flex gap-1 overflow-x-auto px-2 pb-2">{links}</nav>

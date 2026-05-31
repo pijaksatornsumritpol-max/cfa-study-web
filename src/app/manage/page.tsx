@@ -6,6 +6,7 @@ import {
   addQuiz,
   browseCards,
   browseQuestions,
+  extractFileText,
   generateFromText,
   importCardsCsv,
   importQuestionsCsv,
@@ -65,9 +66,42 @@ function Generate() {
   const [nCards, setNCards] = useState(8);
   const [nQuestions, setNQuestions] = useState(5);
   const [busy, setBusy] = useState(false);
+  const [extracting, setExtracting] = useState(false);
   const [msg, setMsg] = useState<{ ok: boolean; text: string } | null>(null);
   const [cards, setCards] = useState<GenCard[]>([]);
   const [questions, setQuestions] = useState<GenQuestion[]>([]);
+
+  async function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setExtracting(true);
+    setMsg(null);
+    try {
+      const dataUrl = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      const res = await extractFileText(dataUrl, file.name);
+      if (res.error || !res.text) {
+        setMsg({ ok: false, text: res.error || "No text found in the file." });
+      } else {
+        setText(res.text);
+        const pageNote = res.pages ? `${res.pages} page(s), ` : "";
+        const trunc = res.truncated ? " (truncated — upload a smaller section for the rest)" : "";
+        setMsg({
+          ok: true,
+          text: `Loaded ${pageNote}${res.text.length.toLocaleString()} characters from ${file.name}.${trunc}`,
+        });
+      }
+    } catch {
+      setMsg({ ok: false, text: "Could not read that file." });
+    } finally {
+      setExtracting(false);
+      e.target.value = "";
+    }
+  }
 
   async function generate() {
     setBusy(true);
@@ -110,9 +144,8 @@ function Generate() {
     <div className="space-y-6">
       <Card>
         <p className="text-sm text-slate-600">
-          Paste study text — a chapter, a section, or your notes — and AI turns it into
-          flashcards and quiz questions for the topic you pick. You review everything before
-          it’s saved.
+          Upload a file (PDF, Excel, CSV) or paste study text, pick a topic, and AI turns it
+          into flashcards and quiz questions. You review everything before it’s saved.
         </p>
         <div className="grid gap-4 sm:grid-cols-[1fr_auto_auto] sm:items-end">
           <Field label="Topic">
@@ -139,6 +172,17 @@ function Generate() {
             />
           </Field>
         </div>
+        <Field label="Upload a file (PDF, Excel, CSV, or text)">
+          <input
+            type="file"
+            accept=".pdf,.xlsx,.xls,.csv,.txt,.md"
+            onChange={onFile}
+            disabled={extracting || busy}
+            className="block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-indigo-600 file:px-4 file:py-2 file:text-sm file:font-semibold file:text-white hover:file:bg-indigo-700"
+          />
+          {extracting && <p className="mt-1 text-sm text-slate-500">⏳ Extracting text…</p>}
+        </Field>
+        <div className="text-center text-xs text-slate-400">— or paste text directly —</div>
         <Field label="Study text">
           <textarea
             value={text}
@@ -149,7 +193,7 @@ function Generate() {
           />
         </Field>
         <div className="flex items-center gap-3">
-          <button onClick={generate} disabled={busy || !text.trim()} className={btnPrimary}>
+          <button onClick={generate} disabled={busy || extracting || !text.trim()} className={btnPrimary}>
             {busy ? "Generating…" : "✨ Generate"}
           </button>
           {msg && (

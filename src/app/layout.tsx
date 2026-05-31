@@ -26,8 +26,17 @@ export default function RootLayout({
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
+      <head>
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              "(function(){try{var t=localStorage.getItem('theme');if(t!=='light'){document.documentElement.classList.add('dark')}}catch(e){document.documentElement.classList.add('dark')}})()",
+          }}
+        />
+      </head>
       <body className="min-h-full md:flex">
         <Sidebar />
         <main className="flex-1 min-w-0 px-4 py-6 md:px-8 md:py-8">

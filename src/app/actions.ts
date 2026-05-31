@@ -378,6 +378,48 @@ export async function saveGenerated(
   return { cards, questions: qs };
 }
 
+// Extract plain text from an uploaded file (PDF, Excel, CSV, or text) so it can
+// be fed to the generator. Receives a base64 data URL from the browser.
+export async function extractFileText(
+  dataUrl: string,
+  filename: string,
+): Promise<{ text?: string; pages?: number; truncated?: boolean; error?: string }> {
+  try {
+    const comma = dataUrl.indexOf(",");
+    const b64 = comma >= 0 ? dataUrl.slice(comma + 1) : dataUrl;
+    const bytes = Buffer.from(b64, "base64");
+    if (bytes.length === 0) return { error: "The file appears to be empty." };
+    if (bytes.length > 8 * 1024 * 1024)
+      return { error: "File too large (max ~8 MB). Upload a smaller section." };
+
+    const ext = (filename.split(".").pop() || "").toLowerCase();
+    const CAP = 40000;
+    let text = "";
+    let pages: number | undefined;
+
+    if (ext === "pdf") {
+      const { extractText, getDocumentProxy } = await import("unpdf");
+      const pdf = await getDocumentProxy(new Uint8Array(bytes));
+      const res = await extractText(pdf, { mergePages: true });
+      pages = res.totalPages;
+      text = res.text;
+    } else if (ext === "xlsx" || ext === "xls") {
+      const XLSX = await import("xlsx");
+      const wb = XLSX.read(bytes, { type: "buffer" });
+      text = wb.SheetNames.map((n) => XLSX.utils.sheet_to_csv(wb.Sheets[n])).join("\n\n");
+    } else {
+      text = bytes.toString("utf8");
+    }
+
+    text = text.replace(/\u0000/g, "").replace(/[ \t]+\n/g, "\n").trim();
+    if (!text) return { error: "No readable text could be extracted from this file." };
+    const truncated = text.length > CAP;
+    return { text: truncated ? text.slice(0, CAP) : text, pages, truncated };
+  } catch (e) {
+    return { error: "Could not read the file. " + String(e).slice(0, 150) };
+  }
+}
+
 function parseLooseJson(raw: string): { flashcards?: unknown; questions?: unknown } | null {
   let s = raw.trim();
   s = s.replace(/^```(?:json)?/i, "").replace(/```$/, "").trim();

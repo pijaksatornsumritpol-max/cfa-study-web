@@ -1,9 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // @libsql/client ships native bindings; let Next require it at runtime
-  // instead of bundling it (fixes Turbopack errors when server actions load it).
-  serverExternalPackages: ["@libsql/client"],
+  // Packages with native/large internals: require at runtime instead of
+  // bundling (avoids Turbopack errors). @libsql/client (native bindings),
+  // unpdf (bundles pdf.js), xlsx (large).
+  serverExternalPackages: ["@libsql/client", "unpdf", "xlsx"],
 };
 
 export default nextConfig;
