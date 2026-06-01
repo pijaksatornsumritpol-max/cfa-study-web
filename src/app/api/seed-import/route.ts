@@ -6,7 +6,7 @@ const QUESTIONS_CSV = "topic_code,stem,choice_a,choice_b,choice_c,correct,explan
 
 export async function GET(req: NextRequest) {
   if (req.nextUrl.searchParams.get("go") !== "1") {
-    return NextResponse.json({ hint: "append ?go=1 to import" });
+    return NextResponse.json({ hint: "append ?go=1 to import", batch: "r8", count: 34 });
   }
   const questions = await importQuestionsCsv(QUESTIONS_CSV);
   return NextResponse.json({ ok: true, questions });
