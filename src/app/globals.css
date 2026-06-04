@@ -72,6 +72,8 @@ body {
 .dark .bg-rose-50 { background-color: rgba(244, 63, 94, 0.13); }
 
 /* Accent text → lighten for contrast */
+.dark .text-indigo-900,
+.dark .text-indigo-800 { color: #c7d2fe; }
 .dark .text-indigo-700,
 .dark .text-indigo-600,
 .dark .text-indigo-500 { color: #a5b4fc; }

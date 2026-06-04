@@ -267,7 +267,7 @@ function mark(text: string, term: string): React.ReactNode[] {
   if (i < 0) return [text];
   return [
     text.slice(0, i),
-    <mark key="m" className="rounded bg-amber-200 px-0.5">
+    <mark key="m" className="rounded bg-amber-300 px-0.5 text-[#0f172a]">
       {text.slice(i, i + term.length)}
     </mark>,
     text.slice(i + term.length),
