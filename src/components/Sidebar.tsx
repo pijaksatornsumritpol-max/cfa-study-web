@@ -12,6 +12,7 @@ const NAV = [
   { href: "/notes", label: "Notes", icon: "📖" },
   { href: "/flashcards", label: "Flashcards", icon: "🃏" },
   { href: "/quiz", label: "Quiz", icon: "📝" },
+  { href: "/simulation", label: "Simulation", icon: "🎯" },
   { href: "/manage", label: "Manage", icon: "⚙️" },
 ];
 

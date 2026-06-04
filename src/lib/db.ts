@@ -139,6 +139,16 @@ async function doInit(): Promise<void> {
       created_at TEXT,
       UNIQUE(topic_code, reading_no)
     );
+    CREATE TABLE IF NOT EXISTS exam_attempts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      started_at TEXT,
+      finished_at TEXT,
+      duration_sec INTEGER,
+      total INTEGER NOT NULL,
+      correct INTEGER NOT NULL,
+      breakdown TEXT DEFAULT '',
+      created_at TEXT
+    );
   `);
 
   // Seed the 10 topics if missing. INSERT OR IGNORE keeps this idempotent and
@@ -613,6 +623,65 @@ export async function searchNotes(q: string): Promise<Note[]> {
     args: [like, like],
   });
   return r.rows.map(mapNote);
+}
+
+// ---------------------------------------------------------------- exam attempts
+export interface ExamAttempt {
+  id: number;
+  started_at: string;
+  finished_at: string;
+  duration_sec: number;
+  total: number;
+  correct: number;
+  breakdown: Record<string, [number, number]>;
+}
+
+export async function saveExamAttempt(a: {
+  started_at: string;
+  finished_at: string;
+  duration_sec: number;
+  total: number;
+  correct: number;
+  breakdown: Record<string, [number, number]>;
+}): Promise<number> {
+  const r = await client.execute({
+    sql: `INSERT INTO exam_attempts (started_at, finished_at, duration_sec, total, correct, breakdown, created_at)
+          VALUES (?,?,?,?,?,?,?)`,
+    args: [
+      a.started_at,
+      a.finished_at,
+      a.duration_sec,
+      a.total,
+      a.correct,
+      JSON.stringify(a.breakdown ?? {}),
+      nowLocalISO(),
+    ] as InValue[],
+  });
+  return Number(r.lastInsertRowid ?? 0);
+}
+
+export async function examHistory(limit = 25): Promise<ExamAttempt[]> {
+  const r = await client.execute({
+    sql: `SELECT * FROM exam_attempts ORDER BY id DESC LIMIT ?`,
+    args: [Math.trunc(limit)],
+  });
+  return r.rows.map((row) => {
+    let breakdown: Record<string, [number, number]> = {};
+    try {
+      breakdown = JSON.parse(str(row.breakdown) || "{}");
+    } catch {
+      breakdown = {};
+    }
+    return {
+      id: num(row.id),
+      started_at: str(row.started_at),
+      finished_at: str(row.finished_at),
+      duration_sec: num(row.duration_sec),
+      total: num(row.total),
+      correct: num(row.correct),
+      breakdown,
+    };
+  });
 }
 
 /** Idempotent upsert of study notes (UNIQUE on topic_code + reading_no). */

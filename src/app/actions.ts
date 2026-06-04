@@ -19,6 +19,8 @@ import {
   deleteQuestion,
   dueFlashcards,
   ensureInit,
+  examHistory,
+  saveExamAttempt,
   getExplanation,
   getFlashcardState,
   getQuestions,
@@ -33,11 +35,11 @@ import {
   todayISO,
   updateCardSchedule,
 } from "@/lib/db";
-import type { Note } from "@/lib/db";
+import type { ExamAttempt, Note } from "@/lib/db";
 import { schedule } from "@/lib/srs";
 import { buildHeatmap, parseSettings, type HabitSettings } from "@/lib/habits";
 import { SAMPLE_CARDS, SAMPLE_QUESTIONS } from "@/lib/seed-data";
-import { CODE_TO_NAME, TOPIC_CODES } from "@/lib/topics";
+import { CODE_TO_NAME, TOPIC_CODES, TOPICS } from "@/lib/topics";
 import type {
   DashboardData,
   Flashcard,
@@ -679,6 +681,94 @@ export async function searchNotes(query: string): Promise<Note[]> {
   const q = (query ?? "").trim();
   if (q.length < 2) return [];
   return searchNotesDb(q);
+}
+
+// ---------------------------------------------------------------- exam simulation
+/** Questions available per topic + total, for the simulation setup screen. */
+export async function simulationAvailability(): Promise<{
+  total: number;
+  byTopic: Record<string, number>;
+}> {
+  await ensureInit();
+  const stats = await countsByTopic();
+  const byTopic: Record<string, number> = {};
+  let total = 0;
+  for (const s of stats) {
+    byTopic[s.code] = s.questions;
+    total += s.questions;
+  }
+  return { total, byTopic };
+}
+
+/** Build a mock exam of n questions, allocated across topics by official CFA
+ *  weights (capped by availability), then shuffled. */
+export async function startSimulation(n = 90): Promise<Question[]> {
+  await ensureInit();
+  const stats = await countsByTopic();
+  const avail: Record<string, number> = {};
+  for (const s of stats) avail[s.code] = s.questions;
+
+  const mids = TOPICS.map((t) => ({ code: t.code, w: (t.low + t.high) / 2 }));
+  const sumW = mids.reduce((a, m) => a + m.w, 0);
+
+  const target: Record<string, number> = {};
+  for (const m of mids) {
+    target[m.code] = Math.min(avail[m.code] ?? 0, Math.round((n * m.w) / sumW));
+  }
+  let allocated = Object.values(target).reduce((a, b) => a + b, 0);
+
+  // Fill any shortfall (from rounding or empty topics) using topics with spare capacity.
+  while (allocated < n) {
+    let progressed = false;
+    for (const m of mids) {
+      if (allocated >= n) break;
+      if (target[m.code] < (avail[m.code] ?? 0)) {
+        target[m.code] += 1;
+        allocated += 1;
+        progressed = true;
+      }
+    }
+    if (!progressed) break; // bank doesn't have n questions total
+  }
+  // Trim any overflow from rounding.
+  while (allocated > n) {
+    for (const m of mids) {
+      if (allocated <= n) break;
+      if (target[m.code] > 0) {
+        target[m.code] -= 1;
+        allocated -= 1;
+      }
+    }
+  }
+
+  const out: Question[] = [];
+  for (const m of mids) {
+    const k = target[m.code] ?? 0;
+    if (k > 0) out.push(...(await getQuestions(m.code, k, true)));
+  }
+  // Shuffle the combined set (Fisher-Yates).
+  for (let i = out.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [out[i], out[j]] = [out[j], out[i]];
+  }
+  return out;
+}
+
+export async function saveSimulation(a: {
+  started_at: string;
+  finished_at: string;
+  duration_sec: number;
+  total: number;
+  correct: number;
+  breakdown: Record<string, [number, number]>;
+}): Promise<number> {
+  await ensureInit();
+  return saveExamAttempt(a);
+}
+
+export async function getSimulationHistory(): Promise<ExamAttempt[]> {
+  await ensureInit();
+  return examHistory(25);
 }
 
 /** Used by the temporary seed-import route to load study notes into the bank. */
