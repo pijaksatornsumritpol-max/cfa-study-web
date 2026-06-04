@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import { explainQuestion, getQuiz, submitAnswer } from "@/app/actions";
 import { btnPrimary, btnSecondary, PageTitle, TopicSelect } from "@/components/ui";
 import { celebrate } from "@/lib/confetti";
-import { CODE_TO_NAME } from "@/lib/topics";
+import { CODE_TO_NAME, TOPIC_CODES } from "@/lib/topics";
 import type { Question } from "@/lib/types";
 
 interface QuizState {
@@ -27,6 +27,12 @@ export default function QuizPage() {
   const [ai, setAi] = useState<
     Record<number, { loading?: boolean; text?: string; error?: string; cached?: boolean }>
   >({});
+
+  // Deep link: pre-select the topic from a ?topic= query param (e.g. from Notes).
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("topic");
+    if (t && TOPIC_CODES.includes(t.toUpperCase())) setTopic(t.toUpperCase());
+  }, []);
 
   // Celebrate finishing a quiz (bigger burst for a strong score).
   useEffect(() => {

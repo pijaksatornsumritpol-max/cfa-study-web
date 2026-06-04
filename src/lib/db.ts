@@ -599,6 +599,22 @@ export async function notesByTopic(code: string): Promise<Note[]> {
   return r.rows.map(mapNote);
 }
 
+/** Full-text-ish search across all notes (title + body), case-insensitive. */
+export async function searchNotes(q: string): Promise<Note[]> {
+  const term = q.trim();
+  if (!term) return [];
+  // Escape LIKE wildcards so a literal % or _ in the query isn't treated as a pattern.
+  const esc = term.replace(/[\\%_]/g, (m) => "\\" + m);
+  const like = `%${esc}%`;
+  const r = await client.execute({
+    sql: `SELECT * FROM notes
+          WHERE title LIKE ? ESCAPE '\\' OR body LIKE ? ESCAPE '\\'
+          ORDER BY topic_code ASC, reading_no ASC`,
+    args: [like, like],
+  });
+  return r.rows.map(mapNote);
+}
+
 /** Idempotent upsert of study notes (UNIQUE on topic_code + reading_no). */
 export async function bulkUpsertNotes(
   items: { topic_code: string; reading_no: number; title: string; body: string }[],

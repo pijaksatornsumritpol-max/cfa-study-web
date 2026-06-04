@@ -5,7 +5,7 @@ import { getDueCards, reviewCard } from "@/app/actions";
 import { btnSecondary, PageTitle, TopicSelect } from "@/components/ui";
 import { celebrate } from "@/lib/confetti";
 import { intervalPreview, QUALITY, type Rating } from "@/lib/srs";
-import { CODE_TO_NAME } from "@/lib/topics";
+import { CODE_TO_NAME, TOPIC_CODES } from "@/lib/topics";
 import type { Flashcard } from "@/lib/types";
 
 const BUTTONS: { rating: Rating; label: string; cls: string }[] = [
@@ -20,6 +20,12 @@ export default function FlashcardsPage() {
   const [queue, setQueue] = useState<Flashcard[] | null>(null);
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
+
+  // Deep link: pre-select the topic from a ?topic= query param (e.g. from Notes).
+  useEffect(() => {
+    const t = new URLSearchParams(window.location.search).get("topic");
+    if (t && TOPIC_CODES.includes(t.toUpperCase())) setTopic(t.toUpperCase());
+  }, []);
 
   const load = useCallback(() => {
     setQueue(null);

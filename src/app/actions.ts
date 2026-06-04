@@ -25,6 +25,7 @@ import {
   getSettingsRaw,
   notesByTopic,
   notesCountsByTopic,
+  searchNotes as searchNotesDb,
   recentAttempts,
   recordAttempt,
   saveExplanation,
@@ -671,6 +672,13 @@ export async function notesOverview(): Promise<Record<string, number>> {
   await ensureInit();
   const counts = await notesCountsByTopic();
   return Object.fromEntries(counts.map((c) => [c.topic_code, c.count]));
+}
+
+export async function searchNotes(query: string): Promise<Note[]> {
+  await ensureInit();
+  const q = (query ?? "").trim();
+  if (q.length < 2) return [];
+  return searchNotesDb(q);
 }
 
 /** Used by the temporary seed-import route to load study notes into the bank. */
