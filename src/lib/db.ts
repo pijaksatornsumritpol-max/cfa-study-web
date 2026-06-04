@@ -130,6 +130,15 @@ async function doInit(): Promise<void> {
       model TEXT,
       created_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      topic_code TEXT NOT NULL,
+      reading_no INTEGER NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TEXT,
+      UNIQUE(topic_code, reading_no)
+    );
   `);
 
   // Seed the 10 topics if missing. INSERT OR IGNORE keeps this idempotent and
@@ -547,4 +556,69 @@ export async function saveExplanation(
           ON CONFLICT(question_id) DO UPDATE SET text=excluded.text, model=excluded.model, created_at=excluded.created_at`,
     args: [questionId, text, model, nowLocalISO()],
   });
+}
+
+// ---------------------------------------------------------------- study notes
+export interface Note {
+  id: number;
+  topic_code: string;
+  reading_no: number;
+  title: string;
+  body: string;
+}
+
+function mapNote(row: Row): Note {
+  return {
+    id: num(row.id),
+    topic_code: str(row.topic_code),
+    reading_no: num(row.reading_no),
+    title: str(row.title),
+    body: str(row.body),
+  };
+}
+
+/** Count of readings (notes) per topic code, for the Notes overview. */
+export async function notesCountsByTopic(): Promise<
+  { topic_code: string; count: number }[]
+> {
+  const r = await client.execute(
+    "SELECT topic_code, COUNT(*) AS count FROM notes GROUP BY topic_code",
+  );
+  return r.rows.map((row) => ({
+    topic_code: str(row.topic_code),
+    count: num(row.count),
+  }));
+}
+
+/** All study notes for one topic, ordered by reading number. */
+export async function notesByTopic(code: string): Promise<Note[]> {
+  const r = await client.execute({
+    sql: "SELECT * FROM notes WHERE topic_code=? ORDER BY reading_no ASC",
+    args: [code.trim().toUpperCase()],
+  });
+  return r.rows.map(mapNote);
+}
+
+/** Idempotent upsert of study notes (UNIQUE on topic_code + reading_no). */
+export async function bulkUpsertNotes(
+  items: { topic_code: string; reading_no: number; title: string; body: string }[],
+): Promise<number> {
+  if (!items.length) return 0;
+  const now = nowLocalISO();
+  const stmts = items
+    .filter((it) => it.topic_code && it.title && it.body)
+    .map((it) => ({
+      sql: `INSERT INTO notes (topic_code, reading_no, title, body, created_at) VALUES (?,?,?,?,?)
+            ON CONFLICT(topic_code, reading_no) DO UPDATE SET title=excluded.title, body=excluded.body, created_at=excluded.created_at`,
+      args: [
+        it.topic_code.trim().toUpperCase(),
+        it.reading_no,
+        it.title,
+        it.body,
+        now,
+      ] as InValue[],
+    }));
+  if (!stmts.length) return 0;
+  await client.batch(stmts, "write");
+  return stmts.length;
 }

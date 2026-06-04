@@ -12,6 +12,7 @@ import {
   allCards,
   bulkAddFlashcards,
   bulkAddQuestions,
+  bulkUpsertNotes,
   countsByTopic,
   dailyActivity,
   deleteFlashcard,
@@ -22,6 +23,8 @@ import {
   getFlashcardState,
   getQuestions,
   getSettingsRaw,
+  notesByTopic,
+  notesCountsByTopic,
   recentAttempts,
   recordAttempt,
   saveExplanation,
@@ -29,6 +32,7 @@ import {
   todayISO,
   updateCardSchedule,
 } from "@/lib/db";
+import type { Note } from "@/lib/db";
 import { schedule } from "@/lib/srs";
 import { buildHeatmap, parseSettings, type HabitSettings } from "@/lib/habits";
 import { SAMPLE_CARDS, SAMPLE_QUESTIONS } from "@/lib/seed-data";
@@ -654,4 +658,40 @@ export async function removeCard(id: number): Promise<void> {
 export async function removeQuestion(id: number): Promise<void> {
   await ensureInit();
   await deleteQuestion(id);
+}
+
+// ---------------------------------------------------------------- study notes
+export async function browseNotes(code: string): Promise<Note[]> {
+  await ensureInit();
+  if (!code || !TOPIC_CODES.includes(code.trim().toUpperCase())) return [];
+  return notesByTopic(code);
+}
+
+export async function notesOverview(): Promise<Record<string, number>> {
+  await ensureInit();
+  const counts = await notesCountsByTopic();
+  return Object.fromEntries(counts.map((c) => [c.topic_code, c.count]));
+}
+
+/** Used by the temporary seed-import route to load study notes into the bank. */
+export async function importNotesJson(
+  json: string,
+): Promise<{ added: number; skipped: number }> {
+  await ensureInit();
+  let items: { topic_code: string; reading_no: number; title: string; body: string }[];
+  try {
+    items = JSON.parse(json);
+  } catch {
+    return { added: 0, skipped: 0 };
+  }
+  const valid = items.filter(
+    (it) =>
+      it &&
+      TOPIC_CODES.includes(String(it.topic_code).trim().toUpperCase()) &&
+      Number.isFinite(it.reading_no) &&
+      String(it.title).trim() &&
+      String(it.body).trim(),
+  );
+  const added = await bulkUpsertNotes(valid);
+  return { added, skipped: items.length - added };
 }
