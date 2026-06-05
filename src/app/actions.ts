@@ -28,6 +28,8 @@ import {
   notesByTopic,
   notesCountsByTopic,
   searchNotes as searchNotesDb,
+  wrongQuestions,
+  wrongCount,
   recentAttempts,
   recordAttempt,
   saveExplanation,
@@ -482,6 +484,21 @@ export async function getQuiz(
 ): Promise<Question[]> {
   await ensureInit();
   return getQuestions(code ?? null, n, true);
+}
+
+/** A quiz built only from questions whose latest attempt was wrong (review mode). */
+export async function getMistakesQuiz(
+  code: string | null,
+  n: number,
+): Promise<Question[]> {
+  await ensureInit();
+  return wrongQuestions(code ?? null, n);
+}
+
+/** How many "mistake" questions are available (overall, or for a topic). */
+export async function getMistakesCount(code: string | null): Promise<number> {
+  await ensureInit();
+  return wrongCount(code ?? null);
 }
 
 export async function submitAnswer(

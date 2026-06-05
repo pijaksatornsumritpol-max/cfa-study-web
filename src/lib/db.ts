@@ -398,6 +398,45 @@ export async function getQuestions(
   return r.rows.map(mapQuestion);
 }
 
+// Questions whose MOST RECENT attempt was incorrect (a question drops out of the
+// review pool once you answer it correctly again). Optional topic filter.
+export async function wrongQuestions(
+  code?: string | null,
+  limit?: number,
+): Promise<Question[]> {
+  let sql = `SELECT q.*, t.code AS topic_code FROM questions q
+             JOIN topics t ON q.topic_id = t.id
+             JOIN (SELECT question_id, MAX(id) AS last_id FROM attempts GROUP BY question_id) L
+               ON q.id = L.question_id
+             JOIN attempts a ON a.id = L.last_id
+             WHERE a.is_correct = 0`;
+  const args: InValue[] = [];
+  if (code) {
+    sql += " AND t.code = ?";
+    args.push(code.trim().toUpperCase());
+  }
+  sql += " ORDER BY RANDOM()";
+  if (limit && Number.isFinite(limit)) sql += ` LIMIT ${Math.trunc(limit)}`;
+  const r = await client.execute({ sql, args });
+  return r.rows.map(mapQuestion);
+}
+
+export async function wrongCount(code?: string | null): Promise<number> {
+  let sql = `SELECT COUNT(*) AS n FROM
+             (SELECT question_id, MAX(id) AS last_id FROM attempts GROUP BY question_id) L
+             JOIN attempts a ON a.id = L.last_id
+             JOIN questions q ON q.id = L.question_id
+             JOIN topics t ON q.topic_id = t.id
+             WHERE a.is_correct = 0`;
+  const args: InValue[] = [];
+  if (code) {
+    sql += " AND t.code = ?";
+    args.push(code.trim().toUpperCase());
+  }
+  const r = await client.execute({ sql, args });
+  return num(r.rows[0]?.n);
+}
+
 export async function recordAttempt(
   questionId: number,
   topicId: number,

@@ -1,7 +1,13 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { explainQuestion, getQuiz, submitAnswer } from "@/app/actions";
+import {
+  explainQuestion,
+  getMistakesCount,
+  getMistakesQuiz,
+  getQuiz,
+  submitAnswer,
+} from "@/app/actions";
 import { btnPrimary, btnSecondary, PageTitle, TopicSelect } from "@/components/ui";
 import { celebrate } from "@/lib/confetti";
 import { CODE_TO_NAME, TOPIC_CODES } from "@/lib/topics";
@@ -24,6 +30,8 @@ export default function QuizPage() {
   const [done, setDone] = useState(false);
   const [starting, setStarting] = useState(false);
   const [warn, setWarn] = useState("");
+  const [reviewMode, setReviewMode] = useState(false);
+  const [mistakes, setMistakes] = useState<number | null>(null);
   const [ai, setAi] = useState<
     Record<number, { loading?: boolean; text?: string; error?: string; cached?: boolean }>
   >({});
@@ -33,6 +41,17 @@ export default function QuizPage() {
     const t = new URLSearchParams(window.location.search).get("topic");
     if (t && TOPIC_CODES.includes(t.toUpperCase())) setTopic(t.toUpperCase());
   }, []);
+
+  // How many questions the user has previously gotten wrong (for review mode).
+  useEffect(() => {
+    if (quiz) return; // only needed on the setup screen
+    getMistakesCount(topic === "ALL" ? null : topic)
+      .then((c) => {
+        setMistakes(c);
+        if (c === 0) setReviewMode(false);
+      })
+      .catch(() => setMistakes(0));
+  }, [topic, quiz]);
 
   // Celebrate finishing a quiz (bigger burst for a strong score).
   useEffect(() => {
@@ -46,9 +65,14 @@ export default function QuizPage() {
     setStarting(true);
     setWarn("");
     try {
-      const qs = await getQuiz(topic === "ALL" ? null : topic, n);
+      const code = topic === "ALL" ? null : topic;
+      const qs = reviewMode ? await getMistakesQuiz(code, n) : await getQuiz(code, n);
       if (qs.length === 0) {
-        setWarn("No questions found for that filter. Add some in Manage.");
+        setWarn(
+          reviewMode
+            ? "No past mistakes for this filter — nice! Switch off review mode to practice all questions."
+            : "No questions found for that filter. Add some in Manage.",
+        );
         return;
       }
       setQuiz({ questions: qs, idx: 0, answers: {}, submitted: {}, correct: 0 });
@@ -85,12 +109,46 @@ export default function QuizPage() {
             }
             className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-1 focus:ring-indigo-500"
           />
+
+          {/* Review-mistakes mode */}
+          <label
+            className={`mt-4 flex items-start gap-3 rounded-lg border p-3 text-sm ${
+              mistakes === 0
+                ? "cursor-not-allowed border-slate-200 bg-slate-50 opacity-60"
+                : "cursor-pointer border-amber-200 bg-amber-50"
+            }`}
+          >
+            <input
+              type="checkbox"
+              checked={reviewMode}
+              disabled={mistakes === 0}
+              onChange={(e) => setReviewMode(e.target.checked)}
+              className="mt-0.5 h-4 w-4 accent-amber-600"
+            />
+            <span>
+              <span className="font-semibold text-slate-800">
+                🔁 Review my mistakes only
+              </span>
+              <span className="mt-0.5 block text-xs text-slate-500">
+                {mistakes === null
+                  ? "Checking…"
+                  : mistakes === 0
+                    ? "No past mistakes for this filter yet — answer some quizzes first."
+                    : `${mistakes} question${mistakes === 1 ? "" : "s"} you last got wrong. They drop off once you get them right.`}
+              </span>
+            </span>
+          </label>
+
           <button
             onClick={start}
             disabled={starting}
             className={`mt-5 w-full ${btnPrimary}`}
           >
-            {starting ? "Loading…" : "Start quiz"}
+            {starting
+              ? "Loading…"
+              : reviewMode
+                ? "Start review"
+                : "Start quiz"}
           </button>
           {warn && <p className="mt-3 text-sm text-amber-600">{warn}</p>}
         </div>
