@@ -21,8 +21,6 @@ import {
   ensureInit,
   examHistory,
   saveExamAttempt,
-  getGoogleAuth,
-  clearGoogleAuth,
   getExplanation,
   getFlashcardState,
   getQuestions,
@@ -45,7 +43,8 @@ import { buildHeatmap, parseSettings, type HabitSettings } from "@/lib/habits";
 import { buildPlan, type StudyPlan } from "@/lib/plan";
 import {
   googleConfigured,
-  getValidAccessToken,
+  serviceAccountEmail,
+  calendarId,
   syncPlanEvents,
   type CalEvent,
 } from "@/lib/google";
@@ -190,21 +189,14 @@ export async function getStudyPlan(): Promise<{
 // ---------------------------------------------------------------- google calendar
 export async function googleAuthStatus(): Promise<{
   configured: boolean;
-  connected: boolean;
-  email: string;
+  serviceEmail: string;
+  calendarId: string;
 }> {
-  await ensureInit();
-  const auth = await getGoogleAuth();
   return {
     configured: googleConfigured(),
-    connected: !!(auth && (auth.refresh_token || auth.access_token)),
-    email: auth?.email ?? "",
+    serviceEmail: serviceAccountEmail(),
+    calendarId: calendarId(),
   };
-}
-
-export async function disconnectGoogle(): Promise<void> {
-  await ensureInit();
-  await clearGoogleAuth();
 }
 
 /** Push the current study plan (topic blocks + review phase + exam day) to Google Calendar. */
@@ -214,8 +206,8 @@ export async function pushPlanToCalendar(): Promise<{
   error?: string;
 }> {
   await ensureInit();
-  const token = await getValidAccessToken();
-  if (!token) return { ok: false, error: "Not connected to Google — sign in first." };
+  if (!googleConfigured())
+    return { ok: false, error: "Google Calendar isn't configured on the server yet." };
 
   const settings = parseSettings(await getSettingsRaw());
   if (!settings.examDate) return { ok: false, error: "Set your exam date first." };
@@ -263,7 +255,7 @@ export async function pushPlanToCalendar(): Promise<{
   });
 
   try {
-    const created = await syncPlanEvents(token, events);
+    const created = await syncPlanEvents(events);
     return { ok: true, created };
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "calendar sync failed" };

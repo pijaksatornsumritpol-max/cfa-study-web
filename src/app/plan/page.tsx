@@ -3,7 +3,6 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
-  disconnectGoogle,
   getStudyPlan,
   googleAuthStatus,
   pushPlanToCalendar,
@@ -34,8 +33,8 @@ export default function PlanPage() {
   const [saving, setSaving] = useState(false);
   const [gauth, setGauth] = useState<{
     configured: boolean;
-    connected: boolean;
-    email: string;
+    serviceEmail: string;
+    calendarId: string;
   } | null>(null);
 
   const load = useCallback(() => {
@@ -200,10 +199,7 @@ export default function PlanPage() {
           <RewardPanel streak={streak} reward={reward} />
 
           {/* Google Calendar */}
-          <GoogleCalendarPanel
-            gauth={gauth}
-            refresh={() => googleAuthStatus().then(setGauth).catch(() => {})}
-          />
+          <GoogleCalendarPanel gauth={gauth} />
         </>
       )}
     </>
@@ -212,23 +208,11 @@ export default function PlanPage() {
 
 function GoogleCalendarPanel({
   gauth,
-  refresh,
 }: {
-  gauth: { configured: boolean; connected: boolean; email: string } | null;
-  refresh: () => void;
+  gauth: { configured: boolean; serviceEmail: string; calendarId: string } | null;
 }) {
   const [syncing, setSyncing] = useState(false);
   const [msg, setMsg] = useState("");
-
-  // Surface the OAuth redirect result (?google=connected|error|notconfigured).
-  useEffect(() => {
-    const g = new URLSearchParams(window.location.search).get("google");
-    if (g === "connected") setMsg("✅ Connected to Google. You can sync your plan now.");
-    else if (g === "error") setMsg("⚠ Google sign-in failed or was cancelled. Try again.");
-    else if (g === "notconfigured")
-      setMsg("⚠ Google isn't configured yet (missing credentials in the server).");
-    if (g) window.history.replaceState({}, "", "/plan");
-  }, []);
 
   async function sync() {
     setSyncing(true);
@@ -244,11 +228,6 @@ function GoogleCalendarPanel({
       setSyncing(false);
     }
   }
-  async function disconnect() {
-    await disconnectGoogle();
-    setMsg("Disconnected. Sign in again to switch account.");
-    refresh();
-  }
 
   return (
     <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
@@ -256,39 +235,31 @@ function GoogleCalendarPanel({
       {gauth === null ? (
         <div className="mt-2 h-6 w-40 animate-pulse rounded bg-slate-200" />
       ) : !gauth.configured ? (
-        <p className="mt-2 text-sm text-slate-600">
-          Calendar sync isn&apos;t set up yet. Add a Google OAuth client&apos;s{" "}
-          <code className="rounded bg-slate-100 px-1 text-xs">GOOGLE_CLIENT_ID</code> and{" "}
-          <code className="rounded bg-slate-100 px-1 text-xs">GOOGLE_CLIENT_SECRET</code>{" "}
-          to the server env, then this turns into a “Sign in with Google” button.
-        </p>
-      ) : gauth.connected ? (
-        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
-          <span className="text-slate-600">
-            Connected as{" "}
-            <span className="font-semibold text-slate-900">{gauth.email || "Google account"}</span>
-          </span>
-          <span className="grow" />
-          <button onClick={sync} disabled={syncing} className={btnPrimary}>
-            {syncing ? "Syncing…" : "🔄 Sync plan to Calendar"}
-          </button>
-          <button onClick={disconnect} className={btnSecondary}>
-            Disconnect / switch account
-          </button>
+        <div className="mt-2 text-sm text-slate-600">
+          <p>
+            Calendar sync uses a Google <strong>service account</strong> (no login). To turn
+            it on, set the server env vars{" "}
+            <code className="rounded bg-slate-100 px-1 text-xs">GOOGLE_SERVICE_ACCOUNT</code>{" "}
+            (the JSON key) and{" "}
+            <code className="rounded bg-slate-100 px-1 text-xs">GOOGLE_CALENDAR_ID</code> (your
+            Gmail), then share that calendar with the service-account email.
+          </p>
         </div>
       ) : (
-        <div className="mt-2 flex flex-wrap items-center gap-3">
-          <p className="text-sm text-slate-600">
-            Sign in with Google to add your study schedule (topic blocks + mock-exam phase +
-            exam day) to your calendar.
+        <div className="mt-2 space-y-3 text-sm">
+          <p className="text-slate-600">
+            Ready — connected via service account. Make sure you&apos;ve shared your calendar (
+            <span className="font-medium text-slate-800">{gauth.calendarId}</span>) with:
           </p>
-          <span className="grow" />
-          <a href="/api/auth/google" className={btnPrimary}>
-            Sign in with Google
-          </a>
+          <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-800">
+            {gauth.serviceEmail}
+          </code>
+          <button onClick={sync} disabled={syncing} className={btnPrimary}>
+            {syncing ? "Syncing…" : "🔄 Sync plan to Google Calendar"}
+          </button>
         </div>
       )}
-      {msg && <p className="mt-3 text-sm text-slate-600">{msg}</p>}
+      {msg && <p className="mt-1 text-sm text-slate-600">{msg}</p>}
     </div>
   );
 }

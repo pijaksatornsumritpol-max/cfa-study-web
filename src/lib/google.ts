@@ -1,112 +1,76 @@
-// Google OAuth (auth-code flow) + Calendar helpers. Server-only (raw fetch).
-import {
-  getGoogleAuth,
-  saveGoogleAuth,
-  type GoogleAuth,
-} from "@/lib/db";
+// Google Calendar via a SERVICE ACCOUNT (server-to-server, no user login).
+// Set env GOOGLE_SERVICE_ACCOUNT = the full service-account JSON key, and
+// GOOGLE_CALENDAR_ID = the calendar to write to (your Gmail address, after you
+// share that calendar with the service account's email). Raw fetch + node crypto.
+import crypto from "node:crypto";
 
-const AUTH = "https://accounts.google.com/o/oauth2/v2/auth";
 const TOKEN = "https://oauth2.googleapis.com/token";
-const USERINFO = "https://www.googleapis.com/oauth2/v2/userinfo";
-const CAL = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
-const SCOPE = "openid email https://www.googleapis.com/auth/calendar.events";
-const TAG = "cfaStudyPlan"; // private extended-property key tagging our events
+const SCOPE = "https://www.googleapis.com/auth/calendar.events";
+const TAG = "cfaStudyPlan";
+const calBase = (id: string) =>
+  `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(id)}/events`;
 
-export function clientId(): string {
-  return process.env.GOOGLE_CLIENT_ID ?? "";
+interface SA {
+  client_email: string;
+  private_key: string;
 }
-function clientSecret(): string {
-  return process.env.GOOGLE_CLIENT_SECRET ?? "";
+function serviceAccount(): SA | null {
+  const raw = process.env.GOOGLE_SERVICE_ACCOUNT;
+  if (!raw) return null;
+  try {
+    const j = JSON.parse(raw) as { client_email?: string; private_key?: string };
+    if (j.client_email && j.private_key) {
+      return { client_email: j.client_email, private_key: j.private_key.replace(/\\n/g, "\n") };
+    }
+  } catch {
+    /* malformed JSON */
+  }
+  return null;
+}
+
+export function calendarId(): string {
+  return process.env.GOOGLE_CALENDAR_ID || "";
+}
+export function serviceAccountEmail(): string {
+  return serviceAccount()?.client_email || "";
 }
 export function googleConfigured(): boolean {
-  return !!clientId() && !!clientSecret();
+  return !!serviceAccount() && !!calendarId();
 }
 
-export function buildAuthUrl(redirectUri: string, state: string): string {
-  const p = new URLSearchParams({
-    client_id: clientId(),
-    redirect_uri: redirectUri,
-    response_type: "code",
-    scope: SCOPE,
-    access_type: "offline",
-    include_granted_scopes: "true",
-    prompt: "consent select_account",
-    state,
-  });
-  return `${AUTH}?${p.toString()}`;
-}
+const b64url = (b: Buffer | string) =>
+  Buffer.from(b).toString("base64").replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
 
-interface TokenResp {
-  access_token: string;
-  expires_in: number;
-  refresh_token?: string;
-  id_token?: string;
-}
-
-export async function exchangeCode(
-  code: string,
-  redirectUri: string,
-): Promise<{ email: string; access_token: string; refresh_token?: string; expiry: number }> {
-  const body = new URLSearchParams({
-    code,
-    client_id: clientId(),
-    client_secret: clientSecret(),
-    redirect_uri: redirectUri,
-    grant_type: "authorization_code",
-  });
+async function getAccessToken(): Promise<string | null> {
+  const sa = serviceAccount();
+  if (!sa) return null;
+  const now = Math.floor(Date.now() / 1000);
+  const header = b64url(JSON.stringify({ alg: "RS256", typ: "JWT" }));
+  const claims = b64url(
+    JSON.stringify({
+      iss: sa.client_email,
+      scope: SCOPE,
+      aud: TOKEN,
+      iat: now,
+      exp: now + 3600,
+    }),
+  );
+  const signingInput = `${header}.${claims}`;
+  const signature = b64url(
+    crypto.sign("RSA-SHA256", Buffer.from(signingInput), sa.private_key),
+  );
+  const assertion = `${signingInput}.${signature}`;
   const r = await fetch(TOKEN, {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
+    body: new URLSearchParams({
+      grant_type: "urn:ietf:params:oauth:grant-type:jwt-bearer",
+      assertion,
+    }),
   });
-  if (!r.ok) throw new Error(`token exchange failed: ${r.status} ${await r.text()}`);
-  const t = (await r.json()) as TokenResp;
-  const email = await fetchUserEmail(t.access_token);
-  return {
-    email,
-    access_token: t.access_token,
-    refresh_token: t.refresh_token,
-    expiry: Date.now() + (t.expires_in - 60) * 1000,
-  };
-}
-
-async function fetchUserEmail(accessToken: string): Promise<string> {
-  try {
-    const r = await fetch(USERINFO, { headers: { Authorization: `Bearer ${accessToken}` } });
-    if (!r.ok) return "";
-    const j = (await r.json()) as { email?: string };
-    return j.email ?? "";
-  } catch {
-    return "";
-  }
-}
-
-async function refreshAccessToken(refreshToken: string): Promise<{ access_token: string; expiry: number }> {
-  const body = new URLSearchParams({
-    client_id: clientId(),
-    client_secret: clientSecret(),
-    refresh_token: refreshToken,
-    grant_type: "refresh_token",
-  });
-  const r = await fetch(TOKEN, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body,
-  });
-  if (!r.ok) throw new Error(`token refresh failed: ${r.status}`);
-  const t = (await r.json()) as TokenResp;
-  return { access_token: t.access_token, expiry: Date.now() + (t.expires_in - 60) * 1000 };
-}
-
-/** Return a valid access token for the stored account, refreshing if expired. */
-export async function getValidAccessToken(): Promise<string | null> {
-  const auth: GoogleAuth | null = await getGoogleAuth();
-  if (!auth || !auth.access_token) return null;
-  if (Date.now() < auth.expiry) return auth.access_token;
-  if (!auth.refresh_token) return null;
-  const fresh = await refreshAccessToken(auth.refresh_token);
-  await saveGoogleAuth({ email: auth.email, access_token: fresh.access_token, expiry: fresh.expiry });
-  return fresh.access_token;
+  if (!r.ok) throw new Error(`service-account token failed: ${r.status} ${await r.text()}`);
+  const j = (await r.json()) as { access_token?: string };
+  return j.access_token ?? null;
 }
 
 export interface CalEvent {
@@ -116,23 +80,33 @@ export interface CalEvent {
   endDateExclusive: string; // YYYY-MM-DD (exclusive)
 }
 
-/** Delete the plan events we previously created, then create the new set. Returns count created. */
-export async function syncPlanEvents(accessToken: string, events: CalEvent[]): Promise<number> {
-  // 1) find + delete existing tagged events
-  const listUrl = `${CAL}?privateExtendedProperty=${encodeURIComponent(TAG + "=1")}&maxResults=2500&singleEvents=true`;
-  const lr = await fetch(listUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+/** Delete our previously-created plan events, then create the new set. Returns count created. */
+export async function syncPlanEvents(events: CalEvent[]): Promise<number> {
+  const token = await getAccessToken();
+  if (!token) throw new Error("Service account not configured");
+  const id = calendarId();
+  if (!id) throw new Error("GOOGLE_CALENDAR_ID is not set");
+  const base = calBase(id);
+  const auth = { Authorization: `Bearer ${token}` };
+
+  // 1) delete existing tagged events
+  const listUrl = `${base}?privateExtendedProperty=${encodeURIComponent(TAG + "=1")}&maxResults=2500&singleEvents=true`;
+  const lr = await fetch(listUrl, { headers: auth });
   if (lr.ok) {
     const j = (await lr.json()) as { items?: { id: string }[] };
     for (const it of j.items ?? []) {
-      await fetch(`${CAL}/${it.id}`, { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}` } });
+      await fetch(`${base}/${it.id}`, { method: "DELETE", headers: auth });
     }
+  } else if (lr.status === 404) {
+    throw new Error("Calendar not found — share your calendar with the service-account email.");
   }
+
   // 2) create the new events
   let created = 0;
   for (const e of events) {
-    const r = await fetch(CAL, {
+    const r = await fetch(base, {
       method: "POST",
-      headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" },
+      headers: { ...auth, "Content-Type": "application/json" },
       body: JSON.stringify({
         summary: e.summary,
         description: e.description ?? "",
