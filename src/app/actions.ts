@@ -40,6 +40,7 @@ import {
 import type { ExamAttempt, Note } from "@/lib/db";
 import { schedule } from "@/lib/srs";
 import { buildHeatmap, parseSettings, type HabitSettings } from "@/lib/habits";
+import { buildPlan, type StudyPlan } from "@/lib/plan";
 import { SAMPLE_CARDS, SAMPLE_QUESTIONS } from "@/lib/seed-data";
 import { CODE_TO_NAME, TOPIC_CODES, TOPICS } from "@/lib/topics";
 import type {
@@ -143,6 +144,39 @@ export async function saveSettings(input: Partial<HabitSettings>): Promise<void>
   if (input.goalQuestions !== undefined)
     entries.goalQuestions = String(Math.max(0, Math.min(500, Math.trunc(input.goalQuestions))));
   await setSettingsRaw(entries);
+}
+
+export async function getStudyPlan(): Promise<{
+  plan: StudyPlan;
+  streak: number;
+  reward: string;
+  examDate: string;
+}> {
+  await ensureInit();
+  const today = todayISO();
+  const settings = parseSettings(await getSettingsRaw());
+  const stats = await countsByTopic();
+  const days = await activityDates();
+  const plan = buildPlan(
+    settings.examDate,
+    today,
+    stats.map((s) => ({
+      code: s.code,
+      name: s.name,
+      weight_low: s.weight_low,
+      weight_high: s.weight_high,
+      questions: s.questions,
+      attempts: s.attempts,
+      correct: s.correct,
+      mature: s.mature,
+    })),
+  );
+  return {
+    plan,
+    streak: computeStreak(days),
+    reward: settings.reward,
+    examDate: settings.examDate,
+  };
 }
 
 // ---------------------------------------------------------------- flashcards

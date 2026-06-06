@@ -8,6 +8,7 @@ import ThemeToggle from "@/components/ThemeToggle";
 
 const NAV = [
   { href: "/", label: "Today", icon: "🗓️" },
+  { href: "/plan", label: "Study Plan", icon: "🗺️" },
   { href: "/dashboard", label: "Dashboard", icon: "📊" },
   { href: "/notes", label: "Notes", icon: "📖" },
   { href: "/flashcards", label: "Flashcards", icon: "🃏" },
