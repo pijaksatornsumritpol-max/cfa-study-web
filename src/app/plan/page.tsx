@@ -2,7 +2,13 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { getStudyPlan, saveSettings } from "@/app/actions";
+import {
+  disconnectGoogle,
+  getStudyPlan,
+  googleAuthStatus,
+  pushPlanToCalendar,
+  saveSettings,
+} from "@/app/actions";
 import { btnPrimary, btnSecondary, PageTitle } from "@/components/ui";
 import type { StudyPlan, TopicPlan, WeekBlock } from "@/lib/plan";
 
@@ -26,6 +32,11 @@ export default function PlanPage() {
   const [data, setData] = useState<PlanData | null>(null);
   const [examInput, setExamInput] = useState(DEFAULT_EXAM);
   const [saving, setSaving] = useState(false);
+  const [gauth, setGauth] = useState<{
+    configured: boolean;
+    connected: boolean;
+    email: string;
+  } | null>(null);
 
   const load = useCallback(() => {
     getStudyPlan()
@@ -37,6 +48,7 @@ export default function PlanPage() {
   }, []);
   useEffect(() => {
     load();
+    googleAuthStatus().then(setGauth).catch(() => setGauth(null));
   }, [load]);
 
   async function saveExam() {
@@ -186,9 +198,98 @@ export default function PlanPage() {
 
           {/* Reward + streak */}
           <RewardPanel streak={streak} reward={reward} />
+
+          {/* Google Calendar */}
+          <GoogleCalendarPanel
+            gauth={gauth}
+            refresh={() => googleAuthStatus().then(setGauth).catch(() => {})}
+          />
         </>
       )}
     </>
+  );
+}
+
+function GoogleCalendarPanel({
+  gauth,
+  refresh,
+}: {
+  gauth: { configured: boolean; connected: boolean; email: string } | null;
+  refresh: () => void;
+}) {
+  const [syncing, setSyncing] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  // Surface the OAuth redirect result (?google=connected|error|notconfigured).
+  useEffect(() => {
+    const g = new URLSearchParams(window.location.search).get("google");
+    if (g === "connected") setMsg("✅ Connected to Google. You can sync your plan now.");
+    else if (g === "error") setMsg("⚠ Google sign-in failed or was cancelled. Try again.");
+    else if (g === "notconfigured")
+      setMsg("⚠ Google isn't configured yet (missing credentials in the server).");
+    if (g) window.history.replaceState({}, "", "/plan");
+  }, []);
+
+  async function sync() {
+    setSyncing(true);
+    setMsg("");
+    try {
+      const r = await pushPlanToCalendar();
+      setMsg(
+        r.ok
+          ? `✅ Synced ${r.created} events to your Google Calendar (topic blocks, review phase, exam day).`
+          : `⚠ ${r.error}`,
+      );
+    } finally {
+      setSyncing(false);
+    }
+  }
+  async function disconnect() {
+    await disconnectGoogle();
+    setMsg("Disconnected. Sign in again to switch account.");
+    refresh();
+  }
+
+  return (
+    <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="text-sm font-semibold text-slate-800">📆 Google Calendar</div>
+      {gauth === null ? (
+        <div className="mt-2 h-6 w-40 animate-pulse rounded bg-slate-200" />
+      ) : !gauth.configured ? (
+        <p className="mt-2 text-sm text-slate-600">
+          Calendar sync isn&apos;t set up yet. Add a Google OAuth client&apos;s{" "}
+          <code className="rounded bg-slate-100 px-1 text-xs">GOOGLE_CLIENT_ID</code> and{" "}
+          <code className="rounded bg-slate-100 px-1 text-xs">GOOGLE_CLIENT_SECRET</code>{" "}
+          to the server env, then this turns into a “Sign in with Google” button.
+        </p>
+      ) : gauth.connected ? (
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-sm">
+          <span className="text-slate-600">
+            Connected as{" "}
+            <span className="font-semibold text-slate-900">{gauth.email || "Google account"}</span>
+          </span>
+          <span className="grow" />
+          <button onClick={sync} disabled={syncing} className={btnPrimary}>
+            {syncing ? "Syncing…" : "🔄 Sync plan to Calendar"}
+          </button>
+          <button onClick={disconnect} className={btnSecondary}>
+            Disconnect / switch account
+          </button>
+        </div>
+      ) : (
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <p className="text-sm text-slate-600">
+            Sign in with Google to add your study schedule (topic blocks + mock-exam phase +
+            exam day) to your calendar.
+          </p>
+          <span className="grow" />
+          <a href="/api/auth/google" className={btnPrimary}>
+            Sign in with Google
+          </a>
+        </div>
+      )}
+      {msg && <p className="mt-3 text-sm text-slate-600">{msg}</p>}
+    </div>
   );
 }
 
