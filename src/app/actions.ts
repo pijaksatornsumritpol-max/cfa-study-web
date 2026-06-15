@@ -33,11 +33,20 @@ import {
   recentAttempts,
   recordAttempt,
   saveExplanation,
+  savePushSubscription,
+  deletePushSubscription,
+  pushSubscriptionCount,
   setSettingsRaw,
   todayISO,
   updateCardSchedule,
 } from "@/lib/db";
 import type { ExamAttempt, Note } from "@/lib/db";
+import {
+  pushConfigured,
+  vapidPublicKey,
+  sendToAll,
+  buildDailyReminder,
+} from "@/lib/push";
 import { schedule } from "@/lib/srs";
 import { buildHeatmap, parseSettings, type HabitSettings } from "@/lib/habits";
 import { buildPlan, type StudyPlan } from "@/lib/plan";
@@ -260,6 +269,53 @@ export async function pushPlanToCalendar(): Promise<{
   } catch (e) {
     return { ok: false, error: e instanceof Error ? e.message : "calendar sync failed" };
   }
+}
+
+// ---------------------------------------------------------------- push notifications
+export async function getPushConfig(): Promise<{
+  configured: boolean;
+  publicKey: string;
+  subscribers: number;
+}> {
+  await ensureInit();
+  return {
+    configured: pushConfigured(),
+    publicKey: vapidPublicKey(),
+    subscribers: await pushSubscriptionCount(),
+  };
+}
+
+/** Store a browser's Web Push subscription so the daily cron can notify it. */
+export async function savePushSub(sub: {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}): Promise<{ ok: boolean }> {
+  await ensureInit();
+  if (!sub.endpoint || !sub.p256dh || !sub.auth) return { ok: false };
+  await savePushSubscription(sub);
+  return { ok: true };
+}
+
+export async function removePushSub(endpoint: string): Promise<{ ok: boolean }> {
+  await ensureInit();
+  if (endpoint) await deletePushSubscription(endpoint);
+  return { ok: true };
+}
+
+/** Fire the real daily reminder right now (so the user can preview it on enable). */
+export async function sendTestPush(): Promise<{
+  ok: boolean;
+  sent?: number;
+  total?: number;
+  error?: string;
+}> {
+  await ensureInit();
+  if (!pushConfigured())
+    return { ok: false, error: "Push notifications aren't configured on the server yet." };
+  const payload = await buildDailyReminder();
+  const res = await sendToAll({ ...payload, tag: "cfa-test" });
+  return { ok: true, sent: res.sent, total: res.total };
 }
 
 // ---------------------------------------------------------------- flashcards

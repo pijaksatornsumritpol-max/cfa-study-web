@@ -157,6 +157,12 @@ async function doInit(): Promise<void> {
       expiry INTEGER,
       updated_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS push_subscriptions (
+      endpoint TEXT PRIMARY KEY,
+      p256dh TEXT NOT NULL,
+      auth TEXT NOT NULL,
+      created_at TEXT
+    );
   `);
 
   // Seed the 10 topics if missing. INSERT OR IGNORE keeps this idempotent and
@@ -794,4 +800,43 @@ export async function bulkUpsertNotes(
   if (!stmts.length) return 0;
   await client.batch(stmts, "write");
   return stmts.length;
+}
+
+// ---------------------------------------------------------------- push subscriptions
+export interface PushSub {
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+}
+
+/** Upsert a device's Web Push subscription (endpoint is the unique key). */
+export async function savePushSubscription(s: PushSub): Promise<void> {
+  await client.execute({
+    sql: `INSERT INTO push_subscriptions (endpoint, p256dh, auth, created_at) VALUES (?,?,?,?)
+          ON CONFLICT(endpoint) DO UPDATE SET p256dh=excluded.p256dh, auth=excluded.auth`,
+    args: [s.endpoint, s.p256dh, s.auth, nowLocalISO()],
+  });
+}
+
+export async function deletePushSubscription(endpoint: string): Promise<void> {
+  await client.execute({
+    sql: "DELETE FROM push_subscriptions WHERE endpoint=?",
+    args: [endpoint],
+  });
+}
+
+export async function allPushSubscriptions(): Promise<PushSub[]> {
+  const r = await client.execute(
+    "SELECT endpoint, p256dh, auth FROM push_subscriptions",
+  );
+  return r.rows.map((row) => ({
+    endpoint: str(row.endpoint),
+    p256dh: str(row.p256dh),
+    auth: str(row.auth),
+  }));
+}
+
+export async function pushSubscriptionCount(): Promise<number> {
+  const r = await client.execute("SELECT COUNT(*) AS n FROM push_subscriptions");
+  return num(r.rows[0]?.n);
 }

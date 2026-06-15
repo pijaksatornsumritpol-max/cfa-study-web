@@ -3,10 +3,14 @@
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import {
+  getPushConfig,
   getStudyPlan,
   googleAuthStatus,
   pushPlanToCalendar,
+  removePushSub,
+  savePushSub,
   saveSettings,
+  sendTestPush,
 } from "@/app/actions";
 import { btnPrimary, btnSecondary, PageTitle } from "@/components/ui";
 import type { StudyPlan, TopicPlan, WeekBlock } from "@/lib/plan";
@@ -198,11 +202,199 @@ export default function PlanPage() {
           {/* Reward + streak */}
           <RewardPanel streak={streak} reward={reward} />
 
+          {/* Daily push reminders */}
+          <NotificationsPanel />
+
           {/* Google Calendar */}
           <GoogleCalendarPanel gauth={gauth} />
         </>
       )}
     </>
+  );
+}
+
+// Convert a base64url VAPID public key to the Uint8Array the Push API expects.
+// Backed by a concrete ArrayBuffer so it satisfies BufferSource under strict TS.
+function urlBase64ToUint8Array(base64String: string): Uint8Array<ArrayBuffer> {
+  const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
+  const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
+  const raw = atob(base64);
+  const buffer = new ArrayBuffer(raw.length);
+  const arr = new Uint8Array(buffer);
+  for (let i = 0; i < raw.length; i++) arr[i] = raw.charCodeAt(i);
+  return arr;
+}
+
+function NotificationsPanel() {
+  const [cfg, setCfg] = useState<{
+    configured: boolean;
+    publicKey: string;
+    subscribers: number;
+  } | null>(null);
+  const [supported, setSupported] = useState(true);
+  const [subscribed, setSubscribed] = useState(false);
+  const [standalone, setStandalone] = useState(true);
+  const [isIOS, setIsIOS] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    getPushConfig().then(setCfg).catch(() => setCfg(null));
+    const ok =
+      typeof window !== "undefined" &&
+      "serviceWorker" in navigator &&
+      "PushManager" in window &&
+      "Notification" in window;
+    setSupported(ok);
+    if (!ok) {
+      // iOS only exposes the Push API once the PWA is installed to the home screen.
+      const ios = /iPad|iPhone|iPod/.test(navigator.userAgent);
+      const sa =
+        window.matchMedia("(display-mode: standalone)").matches ||
+        (navigator as unknown as { standalone?: boolean }).standalone === true;
+      setIsIOS(ios);
+      setStandalone(sa);
+      return;
+    }
+    setIsIOS(/iPad|iPhone|iPod/.test(navigator.userAgent));
+    setStandalone(
+      window.matchMedia("(display-mode: standalone)").matches ||
+        (navigator as unknown as { standalone?: boolean }).standalone === true,
+    );
+    navigator.serviceWorker.getRegistration().then(async (reg) => {
+      if (reg) {
+        const sub = await reg.pushManager.getSubscription();
+        setSubscribed(!!sub);
+      }
+    });
+  }, []);
+
+  async function enable() {
+    setBusy(true);
+    setMsg("");
+    try {
+      if (!cfg?.publicKey) {
+        setMsg("⚠ Server notification keys aren't set yet.");
+        return;
+      }
+      const reg = await navigator.serviceWorker.register("/sw.js");
+      await navigator.serviceWorker.ready;
+      const permission = await Notification.requestPermission();
+      if (permission !== "granted") {
+        setMsg("Notifications were blocked. Allow them in your browser settings to turn this on.");
+        return;
+      }
+      const sub = await reg.pushManager.subscribe({
+        userVisibleOnly: true,
+        applicationServerKey: urlBase64ToUint8Array(cfg.publicKey),
+      });
+      const json = sub.toJSON();
+      const r = await savePushSub({
+        endpoint: sub.endpoint,
+        p256dh: json.keys?.p256dh ?? "",
+        auth: json.keys?.auth ?? "",
+      });
+      if (!r.ok) {
+        setMsg("⚠ Couldn't save the subscription — try again.");
+        return;
+      }
+      setSubscribed(true);
+      setMsg("✅ Daily reminders are on. You'll get a study nudge each morning (~8am).");
+    } catch (e) {
+      setMsg("Couldn't enable notifications: " + String(e).slice(0, 120));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function disable() {
+    setBusy(true);
+    setMsg("");
+    try {
+      const reg = await navigator.serviceWorker.getRegistration();
+      const sub = reg ? await reg.pushManager.getSubscription() : null;
+      if (sub) {
+        await removePushSub(sub.endpoint);
+        await sub.unsubscribe();
+      }
+      setSubscribed(false);
+      setMsg("Reminders turned off on this device.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function test() {
+    setBusy(true);
+    setMsg("");
+    try {
+      const r = await sendTestPush();
+      setMsg(
+        r.ok
+          ? `📨 Sent a test reminder to ${r.sent}/${r.total} device(s). Check your notifications.`
+          : `⚠ ${r.error}`,
+      );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
+      <div className="text-sm font-semibold text-slate-800">🔔 Daily reminders</div>
+
+      {cfg === null ? (
+        <div className="mt-2 h-6 w-40 animate-pulse rounded bg-slate-200" />
+      ) : !cfg.configured ? (
+        <div className="mt-2 text-sm text-slate-600">
+          <p>
+            Push reminders need server keys. Set{" "}
+            <code className="rounded bg-slate-100 px-1 text-xs">VAPID_PUBLIC_KEY</code> and{" "}
+            <code className="rounded bg-slate-100 px-1 text-xs">VAPID_PRIVATE_KEY</code> in your
+            Vercel env vars, then redeploy.
+          </p>
+        </div>
+      ) : !supported ? (
+        <div className="mt-2 text-sm text-slate-600">
+          {isIOS && !standalone ? (
+            <p>
+              On iPhone, first install the app: tap{" "}
+              <span className="font-medium">Share → Add to Home Screen</span>, then open it from
+              the CFA icon and turn reminders on here.
+            </p>
+          ) : (
+            <p>This browser doesn&apos;t support push notifications.</p>
+          )}
+        </div>
+      ) : (
+        <div className="mt-2 space-y-3 text-sm">
+          <p className="text-slate-600">
+            Get a morning nudge with your days-left, today&apos;s focus topic, and your streak —
+            so you never miss a study day.
+          </p>
+          {subscribed ? (
+            <div className="flex flex-wrap gap-2">
+              <button onClick={test} disabled={busy} className={btnSecondary}>
+                {busy ? "…" : "📨 Send a test"}
+              </button>
+              <button onClick={disable} disabled={busy} className={btnSecondary}>
+                Turn off
+              </button>
+            </div>
+          ) : (
+            <button onClick={enable} disabled={busy} className={btnPrimary}>
+              {busy ? "Enabling…" : "🔔 Turn on daily reminders"}
+            </button>
+          )}
+          {isIOS && (
+            <p className="text-xs text-slate-400">
+              iPhone: reminders only work after you&apos;ve added the app to your Home Screen.
+            </p>
+          )}
+        </div>
+      )}
+      {msg && <p className="mt-2 text-sm text-slate-600">{msg}</p>}
+    </div>
   );
 }
 
