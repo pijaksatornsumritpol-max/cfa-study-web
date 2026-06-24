@@ -104,6 +104,9 @@ export interface TodayData {
   settings: HabitSettings;
   cardsReviewedToday: number;
   questionsAnsweredToday: number;
+  readingsReadToday: number;
+  readingsToday: { topic_code: string; reading_no: number; title: string }[];
+  totalReadings: number;
   dueRemaining: number;
   questionsAvailable: number;
   streak: number;

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { browseNotes, notesOverview, searchNotes } from "@/app/actions";
+import { browseNotes, finishReading, getReadTodayKeys, notesOverview, searchNotes } from "@/app/actions";
 import { btnSecondary, PageTitle, TopicSelect } from "@/components/ui";
 import { CODE_TO_NAME, TOPIC_CODES } from "@/lib/topics";
 import type { Note } from "@/lib/db";
@@ -12,6 +12,32 @@ export default function NotesPage() {
   const [topic, setTopic] = useState<string>("");
   const [notes, setNotes] = useState<Note[] | null>(null);
   const [openId, setOpenId] = useState<number | null>(null);
+  const [readKeys, setReadKeys] = useState<Set<string>>(new Set());
+
+  const refreshRead = useCallback(() => {
+    getReadTodayKeys()
+      .then((k) => setReadKeys(new Set(k)))
+      .catch(() => {});
+  }, []);
+  useEffect(() => {
+    refreshRead();
+  }, [refreshRead]);
+
+  async function toggleRead(note: Note) {
+    const key = `${note.topic_code}-${note.reading_no}`;
+    const isRead = readKeys.has(key);
+    setReadKeys((prev) => {
+      const n = new Set(prev);
+      if (isRead) n.delete(key);
+      else n.add(key);
+      return n;
+    });
+    try {
+      await finishReading(note.topic_code, note.reading_no, !isRead);
+    } catch {
+      refreshRead();
+    }
+  }
 
   // Search state
   const [query, setQuery] = useState("");
@@ -107,6 +133,8 @@ export default function NotesPage() {
           searching={searching}
           openId={openId}
           setOpenId={setOpenId}
+          readKeys={readKeys}
+          onToggleRead={toggleRead}
         />
       ) : (
         /* ---------------- BROWSE MODE ---------------- */
@@ -164,6 +192,8 @@ export default function NotesPage() {
                   note={n}
                   open={openId === n.id}
                   onToggle={() => setOpenId((id) => (id === n.id ? null : n.id))}
+                  read={readKeys.has(`${n.topic_code}-${n.reading_no}`)}
+                  onToggleRead={() => toggleRead(n)}
                 />
               ))}
             </div>
@@ -180,12 +210,16 @@ function SearchResults({
   searching,
   openId,
   setOpenId,
+  readKeys,
+  onToggleRead,
 }: {
   query: string;
   results: Note[] | null;
   searching: boolean;
   openId: number | null;
   setOpenId: (fn: (id: number | null) => number | null) => void;
+  readKeys: Set<string>;
+  onToggleRead: (note: Note) => void;
 }) {
   if (searching && results === null) {
     return <div className="h-40 animate-pulse rounded-xl bg-slate-200" />;
@@ -211,6 +245,8 @@ function SearchResults({
             onToggle={() => setOpenId((id) => (id === n.id ? null : n.id))}
             highlight={query}
             showTopic
+            read={readKeys.has(`${n.topic_code}-${n.reading_no}`)}
+            onToggleRead={() => onToggleRead(n)}
           />
         ))}
       </div>
@@ -224,12 +260,16 @@ function NoteCard({
   onToggle,
   highlight,
   showTopic,
+  read,
+  onToggleRead,
 }: {
   note: Note;
   open: boolean;
   onToggle: () => void;
   highlight?: string;
   showTopic?: boolean;
+  read?: boolean;
+  onToggleRead?: () => void;
 }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -255,6 +295,25 @@ function NoteCard({
       {open && (
         <div className="border-t border-slate-100 px-5 py-4">
           <NoteBody body={note.body} />
+          {onToggleRead && (
+            <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
+              <button
+                onClick={onToggleRead}
+                className={
+                  read
+                    ? "inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+                    : "inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-violet-700"
+                }
+              >
+                {read ? "✓ Read today" : "Finished reading"}
+              </button>
+              <span className="text-xs text-slate-400">
+                {read
+                  ? "Logged in today's reading — tap to undo."
+                  : "Mark as read to log what you read today."}
+              </span>
+            </div>
+          )}
         </div>
       )}
     </div>

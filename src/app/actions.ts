@@ -36,6 +36,11 @@ import {
   savePushSubscription,
   deletePushSubscription,
   pushSubscriptionCount,
+  markReadingRead,
+  unmarkReadingToday,
+  readingsReadKeysForDay,
+  readingsReadForDay,
+  totalReadingsCount,
   setSettingsRaw,
   todayISO,
   updateCardSchedule,
@@ -131,12 +136,17 @@ export async function getToday(): Promise<TodayData> {
 
   const weeks = 12;
   const activityMap = await dailyActivity(addDaysISO(today, -(weeks * 7)));
+  const readingsToday = await readingsReadForDay(today);
+  const totalReadings = await totalReadingsCount();
 
   return {
     today,
     settings,
     cardsReviewedToday: todayCounts.cards,
     questionsAnsweredToday: todayCounts.questions,
+    readingsReadToday: readingsToday.length,
+    readingsToday,
+    totalReadings,
     dueRemaining: stats.reduce((a, s) => a + s.due, 0),
     questionsAvailable: stats.reduce((a, s) => a + s.questions, 0),
     streak: computeStreak(days),
@@ -159,6 +169,8 @@ export async function saveSettings(input: Partial<HabitSettings>): Promise<void>
     entries.goalCards = String(Math.max(1, Math.min(500, Math.trunc(input.goalCards))));
   if (input.goalQuestions !== undefined)
     entries.goalQuestions = String(Math.max(0, Math.min(500, Math.trunc(input.goalQuestions))));
+  if (input.goalReadings !== undefined)
+    entries.goalReadings = String(Math.max(0, Math.min(100, Math.trunc(input.goalReadings))));
   await setSettingsRaw(entries);
 }
 
@@ -871,6 +883,27 @@ export async function searchNotes(query: string): Promise<Note[]> {
   const q = (query ?? "").trim();
   if (q.length < 2) return [];
   return searchNotesDb(q);
+}
+
+// ---------------------------------------------------------------- reading log
+/** Mark (or unmark) a reading as read today — records what you read each day. */
+export async function finishReading(
+  code: string,
+  readingNo: number,
+  done = true,
+): Promise<{ ok: boolean }> {
+  await ensureInit();
+  if (!TOPIC_CODES.includes(code.trim().toUpperCase()) || !Number.isFinite(readingNo))
+    return { ok: false };
+  if (done) await markReadingRead(code, readingNo);
+  else await unmarkReadingToday(code, readingNo);
+  return { ok: true };
+}
+
+/** Keys ("CODE-readingNo") of readings already read today — for button state on Notes. */
+export async function getReadTodayKeys(): Promise<string[]> {
+  await ensureInit();
+  return readingsReadKeysForDay();
 }
 
 // ---------------------------------------------------------------- exam simulation

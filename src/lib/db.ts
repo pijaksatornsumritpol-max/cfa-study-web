@@ -163,6 +163,12 @@ async function doInit(): Promise<void> {
       auth TEXT NOT NULL,
       created_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS reading_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      topic_code TEXT NOT NULL,
+      reading_no INTEGER NOT NULL,
+      read_at TEXT
+    );
   `);
 
   // Seed the 10 topics if missing. INSERT OR IGNORE keeps this idempotent and
@@ -514,16 +520,18 @@ export async function countsByTopic(): Promise<TopicStat[]> {
 }
 
 export async function activityDates(): Promise<Set<string>> {
-  const [rev, att] = await client.batch(
+  const [rev, att, rd] = await client.batch(
     [
       "SELECT DISTINCT substr(reviewed_at,1,10) AS d FROM reviews WHERE reviewed_at IS NOT NULL",
       "SELECT DISTINCT substr(answered_at,1,10) AS d FROM attempts WHERE answered_at IS NOT NULL",
+      "SELECT DISTINCT substr(read_at,1,10) AS d FROM reading_log WHERE read_at IS NOT NULL",
     ],
     "read",
   );
   const days = new Set<string>();
   for (const r of rev.rows) if (r.d) days.add(str(r.d));
   for (const r of att.rows) if (r.d) days.add(str(r.d));
+  for (const r of rd.rows) if (r.d) days.add(str(r.d));
   return days;
 }
 
@@ -561,7 +569,7 @@ export async function activityCountsForDay(
 
 /** Per-day activity (reviews + attempts) on/after `sinceISO`, for the heatmap. */
 export async function dailyActivity(sinceISO: string): Promise<Map<string, number>> {
-  const [rev, att] = await client.batch(
+  const [rev, att, rd] = await client.batch(
     [
       {
         sql: "SELECT substr(reviewed_at,1,10) AS d, COUNT(*) AS n FROM reviews WHERE reviewed_at >= ? GROUP BY d",
@@ -571,11 +579,15 @@ export async function dailyActivity(sinceISO: string): Promise<Map<string, numbe
         sql: "SELECT substr(answered_at,1,10) AS d, COUNT(*) AS n FROM attempts WHERE answered_at >= ? GROUP BY d",
         args: [sinceISO],
       },
+      {
+        sql: "SELECT substr(read_at,1,10) AS d, COUNT(*) AS n FROM reading_log WHERE read_at >= ? GROUP BY d",
+        args: [sinceISO],
+      },
     ],
     "read",
   );
   const m = new Map<string, number>();
-  for (const r of [...rev.rows, ...att.rows]) {
+  for (const r of [...rev.rows, ...att.rows, ...rd.rows]) {
     const d = str(r.d);
     if (d) m.set(d, (m.get(d) ?? 0) + num(r.n));
   }
@@ -838,5 +850,68 @@ export async function allPushSubscriptions(): Promise<PushSub[]> {
 
 export async function pushSubscriptionCount(): Promise<number> {
   const r = await client.execute("SELECT COUNT(*) AS n FROM push_subscriptions");
+  return num(r.rows[0]?.n);
+}
+
+// ---------------------------------------------------------------- reading log
+export interface ReadReading {
+  topic_code: string;
+  reading_no: number;
+  title: string;
+}
+
+/** Log a reading as "read today" (idempotent per reading per day). */
+export async function markReadingRead(code: string, readingNo: number): Promise<void> {
+  const cc = code.trim().toUpperCase();
+  const today = todayISO();
+  const exists = await client.execute({
+    sql: "SELECT 1 FROM reading_log WHERE topic_code=? AND reading_no=? AND substr(read_at,1,10)=? LIMIT 1",
+    args: [cc, readingNo, today],
+  });
+  if (exists.rows.length) return;
+  await client.execute({
+    sql: "INSERT INTO reading_log (topic_code, reading_no, read_at) VALUES (?,?,?)",
+    args: [cc, readingNo, nowLocalISO()],
+  });
+}
+
+/** Undo today's "read" mark for a reading. */
+export async function unmarkReadingToday(code: string, readingNo: number): Promise<void> {
+  await client.execute({
+    sql: "DELETE FROM reading_log WHERE topic_code=? AND reading_no=? AND substr(read_at,1,10)=?",
+    args: [code.trim().toUpperCase(), readingNo, todayISO()],
+  });
+}
+
+/** Keys ("CODE-readingNo") of readings marked read on a given day — for button state. */
+export async function readingsReadKeysForDay(day = todayISO()): Promise<string[]> {
+  const r = await client.execute({
+    sql: "SELECT DISTINCT topic_code, reading_no FROM reading_log WHERE substr(read_at,1,10)=?",
+    args: [day],
+  });
+  return r.rows.map((row) => `${str(row.topic_code)}-${num(row.reading_no)}`);
+}
+
+/** Distinct readings read on a given day, with title (joined from notes), newest first. */
+export async function readingsReadForDay(day = todayISO()): Promise<ReadReading[]> {
+  const r = await client.execute({
+    sql: `SELECT l.topic_code, l.reading_no, COALESCE(n.title,'') AS title, MAX(l.read_at) AS t
+          FROM reading_log l
+          LEFT JOIN notes n ON n.topic_code = l.topic_code AND n.reading_no = l.reading_no
+          WHERE substr(l.read_at,1,10) = ?
+          GROUP BY l.topic_code, l.reading_no
+          ORDER BY t DESC`,
+    args: [day],
+  });
+  return r.rows.map((row) => ({
+    topic_code: str(row.topic_code),
+    reading_no: num(row.reading_no),
+    title: str(row.title),
+  }));
+}
+
+/** Total readings available (count of notes) — denominator for reading progress. */
+export async function totalReadingsCount(): Promise<number> {
+  const r = await client.execute("SELECT COUNT(*) AS n FROM notes");
   return num(r.rows[0]?.n);
 }
