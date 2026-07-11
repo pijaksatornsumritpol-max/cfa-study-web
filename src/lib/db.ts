@@ -149,14 +149,6 @@ async function doInit(): Promise<void> {
       breakdown TEXT DEFAULT '',
       created_at TEXT
     );
-    CREATE TABLE IF NOT EXISTS google_auth (
-      id INTEGER PRIMARY KEY,
-      email TEXT,
-      access_token TEXT,
-      refresh_token TEXT,
-      expiry INTEGER,
-      updated_at TEXT
-    );
     CREATE TABLE IF NOT EXISTS push_subscriptions (
       endpoint TEXT PRIMARY KEY,
       p256dh TEXT NOT NULL,
@@ -723,47 +715,6 @@ export async function saveExamAttempt(a: {
     ] as InValue[],
   });
   return Number(r.lastInsertRowid ?? 0);
-}
-
-// ---------------------------------------------------------------- google auth
-export interface GoogleAuth {
-  email: string;
-  access_token: string;
-  refresh_token: string;
-  expiry: number; // epoch ms
-}
-
-export async function getGoogleAuth(): Promise<GoogleAuth | null> {
-  const r = await client.execute("SELECT * FROM google_auth WHERE id=1");
-  if (!r.rows.length) return null;
-  const row = r.rows[0];
-  return {
-    email: str(row.email),
-    access_token: str(row.access_token),
-    refresh_token: str(row.refresh_token),
-    expiry: num(row.expiry),
-  };
-}
-
-export async function saveGoogleAuth(a: {
-  email: string;
-  access_token: string;
-  refresh_token?: string; // Google only returns this on first consent — keep the old one otherwise
-  expiry: number;
-}): Promise<void> {
-  const existing = await getGoogleAuth();
-  const refresh = a.refresh_token || existing?.refresh_token || "";
-  await client.execute({
-    sql: `INSERT INTO google_auth (id, email, access_token, refresh_token, expiry, updated_at)
-          VALUES (1,?,?,?,?,?)
-          ON CONFLICT(id) DO UPDATE SET email=excluded.email, access_token=excluded.access_token,
-            refresh_token=excluded.refresh_token, expiry=excluded.expiry, updated_at=excluded.updated_at`,
-    args: [a.email, a.access_token, refresh, a.expiry, nowLocalISO()] as InValue[],
-  });
-}
-
-export async function clearGoogleAuth(): Promise<void> {
-  await client.execute("DELETE FROM google_auth WHERE id=1");
 }
 
 export async function examHistory(limit = 25): Promise<ExamAttempt[]> {

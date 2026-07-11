@@ -5,8 +5,6 @@ import { useCallback, useEffect, useState } from "react";
 import {
   getPushConfig,
   getStudyPlan,
-  googleAuthStatus,
-  pushPlanToCalendar,
   removePushSub,
   savePushSub,
   saveSettings,
@@ -35,11 +33,6 @@ export default function PlanPage() {
   const [data, setData] = useState<PlanData | null>(null);
   const [examInput, setExamInput] = useState(DEFAULT_EXAM);
   const [saving, setSaving] = useState(false);
-  const [gauth, setGauth] = useState<{
-    configured: boolean;
-    serviceEmail: string;
-    calendarId: string;
-  } | null>(null);
 
   const load = useCallback(() => {
     getStudyPlan()
@@ -51,7 +44,6 @@ export default function PlanPage() {
   }, []);
   useEffect(() => {
     load();
-    googleAuthStatus().then(setGauth).catch(() => setGauth(null));
   }, [load]);
 
   async function saveExam() {
@@ -204,9 +196,6 @@ export default function PlanPage() {
 
           {/* Daily push reminders */}
           <NotificationsPanel />
-
-          {/* Google Calendar */}
-          <GoogleCalendarPanel gauth={gauth} />
         </>
       )}
     </>
@@ -394,64 +383,6 @@ function NotificationsPanel() {
         </div>
       )}
       {msg && <p className="mt-2 text-sm text-slate-600">{msg}</p>}
-    </div>
-  );
-}
-
-function GoogleCalendarPanel({
-  gauth,
-}: {
-  gauth: { configured: boolean; serviceEmail: string; calendarId: string } | null;
-}) {
-  const [syncing, setSyncing] = useState(false);
-  const [msg, setMsg] = useState("");
-
-  async function sync() {
-    setSyncing(true);
-    setMsg("");
-    try {
-      const r = await pushPlanToCalendar();
-      setMsg(
-        r.ok
-          ? `✅ Synced ${r.created} events to your Google Calendar (topic blocks, review phase, exam day).`
-          : `⚠ ${r.error}`,
-      );
-    } finally {
-      setSyncing(false);
-    }
-  }
-
-  return (
-    <div className="mt-5 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm">
-      <div className="text-sm font-semibold text-slate-800">📆 Google Calendar</div>
-      {gauth === null ? (
-        <div className="mt-2 h-6 w-40 animate-pulse rounded bg-slate-200" />
-      ) : !gauth.configured ? (
-        <div className="mt-2 text-sm text-slate-600">
-          <p>
-            Calendar sync uses a Google <strong>service account</strong> (no login). To turn
-            it on, set the server env vars{" "}
-            <code className="rounded bg-slate-100 px-1 text-xs">GOOGLE_SERVICE_ACCOUNT</code>{" "}
-            (the JSON key) and{" "}
-            <code className="rounded bg-slate-100 px-1 text-xs">GOOGLE_CALENDAR_ID</code> (your
-            Gmail), then share that calendar with the service-account email.
-          </p>
-        </div>
-      ) : (
-        <div className="mt-2 space-y-3 text-sm">
-          <p className="text-slate-600">
-            Ready — connected via service account. Make sure you&apos;ve shared your calendar (
-            <span className="font-medium text-slate-800">{gauth.calendarId}</span>) with:
-          </p>
-          <code className="block break-all rounded-lg bg-slate-100 px-3 py-2 text-xs text-slate-800">
-            {gauth.serviceEmail}
-          </code>
-          <button onClick={sync} disabled={syncing} className={btnPrimary}>
-            {syncing ? "Syncing…" : "🔄 Sync plan to Google Calendar"}
-          </button>
-        </div>
-      )}
-      {msg && <p className="mt-1 text-sm text-slate-600">{msg}</p>}
     </div>
   );
 }

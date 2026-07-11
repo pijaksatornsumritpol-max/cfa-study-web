@@ -55,13 +55,6 @@ import {
 import { schedule } from "@/lib/srs";
 import { buildHeatmap, parseSettings, type HabitSettings } from "@/lib/habits";
 import { buildPlan, type StudyPlan } from "@/lib/plan";
-import {
-  googleConfigured,
-  serviceAccountEmail,
-  calendarId,
-  syncPlanEvents,
-  type CalEvent,
-} from "@/lib/google";
 import { SAMPLE_CARDS, SAMPLE_QUESTIONS } from "@/lib/seed-data";
 import { CODE_TO_NAME, TOPIC_CODES, TOPICS } from "@/lib/topics";
 import type {
@@ -205,82 +198,6 @@ export async function getStudyPlan(): Promise<{
     reward: settings.reward,
     examDate: settings.examDate,
   };
-}
-
-// ---------------------------------------------------------------- google calendar
-export async function googleAuthStatus(): Promise<{
-  configured: boolean;
-  serviceEmail: string;
-  calendarId: string;
-}> {
-  return {
-    configured: googleConfigured(),
-    serviceEmail: serviceAccountEmail(),
-    calendarId: calendarId(),
-  };
-}
-
-/** Push the current study plan (topic blocks + review phase + exam day) to Google Calendar. */
-export async function pushPlanToCalendar(): Promise<{
-  ok: boolean;
-  created?: number;
-  error?: string;
-}> {
-  await ensureInit();
-  if (!googleConfigured())
-    return { ok: false, error: "Google Calendar isn't configured on the server yet." };
-
-  const settings = parseSettings(await getSettingsRaw());
-  if (!settings.examDate) return { ok: false, error: "Set your exam date first." };
-
-  const stats = await countsByTopic();
-  const plan = buildPlan(
-    settings.examDate,
-    todayISO(),
-    stats.map((s) => ({
-      code: s.code,
-      name: s.name,
-      weight_low: s.weight_low,
-      weight_high: s.weight_high,
-      questions: s.questions,
-      attempts: s.attempts,
-      correct: s.correct,
-      mature: s.mature,
-    })),
-  );
-
-  const events: CalEvent[] = [];
-  const reviewBlocks = plan.schedule.filter((b) => b.kind === "review");
-  for (const b of plan.schedule) {
-    if (b.kind === "review") continue; // merged below
-    events.push({
-      summary: `📚 CFA — ${CODE_TO_NAME[b.codes[0]] ?? b.codes[0]}`,
-      description: b.label,
-      startDate: b.startISO,
-      endDateExclusive: addDaysISO(b.endISO, 1),
-    });
-  }
-  if (reviewBlocks.length) {
-    events.push({
-      summary: "📝 CFA — Review + Mock Exams",
-      description: "Review weak topics and take full timed Simulations; clear your mistakes.",
-      startDate: reviewBlocks[0].startISO,
-      endDateExclusive: addDaysISO(reviewBlocks[reviewBlocks.length - 1].endISO, 1),
-    });
-  }
-  events.push({
-    summary: "🎓 CFA Level 1 Exam",
-    description: "Exam day — good luck!",
-    startDate: settings.examDate,
-    endDateExclusive: addDaysISO(settings.examDate, 1),
-  });
-
-  try {
-    const created = await syncPlanEvents(events);
-    return { ok: true, created };
-  } catch (e) {
-    return { ok: false, error: e instanceof Error ? e.message : "calendar sync failed" };
-  }
 }
 
 // ---------------------------------------------------------------- push notifications
