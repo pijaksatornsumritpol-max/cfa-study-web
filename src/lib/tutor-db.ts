@@ -67,6 +67,26 @@ export async function getTutorContext(cardId: number): Promise<TutorContext | nu
   };
 }
 
+/**
+ * Existence/ownership check for a client-supplied `sessionId`. The client latches
+ * the id from the `start` frame and replays it on every later turn, so a deleted
+ * session or a reset DB leaves it holding a stale id — writing against that is a
+ * FOREIGN KEY constraint failure (a 500). Callers use this to answer 404 instead.
+ */
+export async function getSession(
+  sessionId: number,
+): Promise<{ topicCode: string; cardId: number } | null> {
+  const r = await client.execute({
+    sql: "SELECT topic_code, flashcard_id FROM tutor_sessions WHERE id = ?",
+    args: [sessionId],
+  });
+  if (!r.rows.length) return null;
+  return {
+    topicCode: str(r.rows[0].topic_code),
+    cardId: num(r.rows[0].flashcard_id),
+  };
+}
+
 export async function createSession(
   topicCode: string,
   cardId: number,
