@@ -48,6 +48,14 @@ import {
 import type { ExamAttempt, Note } from "@/lib/db";
 import { callClaude } from "@/lib/claude";
 import {
+  listSessions,
+  getMessages,
+  getMessageWithTopic,
+  saveTutorNote,
+  listTutorNotes,
+  transcriptFor,
+} from "@/lib/tutor-db";
+import {
   pushConfigured,
   vapidPublicKey,
   sendToAll,
@@ -890,4 +898,66 @@ export async function importNotesJson(
   );
   const added = await bulkUpsertNotes(valid);
   return { added, skipped: items.length - added };
+}
+
+// ---------------------------------------------------------------- AI tutor
+export async function listTutorSessions(topicCode?: string | null) {
+  await ensureInit();
+  return listSessions(topicCode ?? null);
+}
+
+export async function getTutorSession(sessionId: number) {
+  await ensureInit();
+  return getMessages(sessionId, 100);
+}
+
+export async function saveAnswerAsNote(
+  messageId: number,
+): Promise<{ ok: boolean; error?: string }> {
+  await ensureInit();
+  const m = await getMessageWithTopic(messageId);
+  if (!m || !m.content.trim()) return { ok: false, error: "Nothing to save." };
+  await saveTutorNote(m.topic_code, m.title || "Tutor answer", m.content, "answer");
+  return { ok: true };
+}
+
+const SUMMARY_SYSTEM = `You turn a CFA student's tutor conversations into one revision note.
+Write a tight, exam-focused note in English: the key ideas, the formulas, and the mistakes the student kept making.
+Use short bullets. Keep CFA terminology exact. Do not invent anything that is not in the transcript.
+Start with a single-line title, then the note body. No preamble.`;
+
+export async function summariseSessionsToNote(
+  sessionIds: number[],
+): Promise<{ ok: boolean; error?: string }> {
+  await ensureInit();
+  if (!sessionIds.length) return { ok: false, error: "Select at least one chat." };
+
+  const { topicCode, text } = await transcriptFor(sessionIds);
+  if (!text.trim()) return { ok: false, error: "Those chats are empty." };
+
+  const key = process.env.ANTHROPIC_API_KEY;
+  if (!key) {
+    return {
+      ok: false,
+      error:
+        "AI explanations aren’t set up yet. Add an ANTHROPIC_API_KEY (or GEMINI_API_KEY) environment variable.",
+    };
+  }
+  const model = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";
+  const r = await callClaude(key, model, text.slice(0, 12000), SUMMARY_SYSTEM, 900);
+  if (!r.text) return { ok: false, error: r.error };
+
+  const [firstLine, ...rest] = r.text.split("\n");
+  await saveTutorNote(
+    topicCode,
+    firstLine.replace(/^#+\s*/, "").trim() || "Tutor summary",
+    rest.join("\n").trim() || r.text,
+    "summary",
+  );
+  return { ok: true };
+}
+
+export async function getTutorNotes(topicCode: string) {
+  await ensureInit();
+  return listTutorNotes(topicCode);
 }
