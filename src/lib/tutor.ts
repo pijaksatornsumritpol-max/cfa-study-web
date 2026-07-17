@@ -55,6 +55,32 @@ export function parseRelated(text: string): { body: string; followups: string[] 
   return { body: lines.slice(0, -1).join("\n").trim(), followups };
 }
 
+/**
+ * Trims a raw history window to a valid Anthropic Messages prefix: starts with
+ * `user`, strictly alternates, ends with `assistant` (or is empty).
+ *
+ * Three shapes are reachable and each is a 400 from the API:
+ * - an unpaired trailing `user` (a turn whose Claude call failed before an
+ *   assistant message was persisted),
+ * - a leading `assistant` (the window boundary landed mid-turn),
+ * - consecutive same-role messages *inside* the window (a failed turn followed
+ *   by a retry persists `[u1,u2,a1]`).
+ *
+ * Walks newest -> oldest so that when a run of same-role messages collapses we
+ * keep the most recent one — for `[u1,u2,a1]` the kept question is `u2`, the
+ * one that actually produced `a1`.
+ */
+export function toValidHistory<T extends { role: "user" | "assistant" }>(rows: T[]): T[] {
+  const kept: T[] = [];
+  for (let i = rows.length - 1; i >= 0; i--) {
+    if (!kept.length || kept[kept.length - 1].role !== rows[i].role) kept.push(rows[i]);
+  }
+  kept.reverse();
+  while (kept.length && kept[kept.length - 1].role === "user") kept.pop();
+  while (kept.length && kept[0].role === "assistant") kept.shift();
+  return kept;
+}
+
 export function renderContextBlock(c: TutorContext, question: string): string {
   const accuracy =
     c.topicAttempts > 0

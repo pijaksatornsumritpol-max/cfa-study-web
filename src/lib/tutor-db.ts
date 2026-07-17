@@ -2,7 +2,7 @@
 import "server-only";
 import type { InValue } from "@libsql/client";
 import { client, str, nowLocalISO, countsByTopic } from "./db";
-import type { TutorContext } from "./tutor";
+import { toValidHistory, type TutorContext } from "./tutor";
 
 const num = (v: unknown): number => (v == null ? 0 : Number(v));
 
@@ -127,18 +127,15 @@ export async function getMessages(sessionId: number, limit = 8): Promise<TutorMe
 }
 
 /**
- * History for the Anthropic Messages API. Trims the window to a valid prefix:
- * a failed turn leaves an unpaired trailing user message, and a window boundary
- * can leave a leading assistant — either shape is a 400 from the API.
+ * History for the Anthropic Messages API. `getMessages` returns the raw window,
+ * which is not necessarily a legal conversation prefix; `toValidHistory` (pure,
+ * unit-tested in tutor.ts) does the trimming.
  */
 export async function getHistoryForClaude(
   sessionId: number,
   limit = 8,
 ): Promise<TutorMessage[]> {
-  const rows = await getMessages(sessionId, limit);
-  while (rows.length && rows[rows.length - 1].role === "user") rows.pop();
-  while (rows.length && rows[0].role === "assistant") rows.shift();
-  return rows;
+  return toValidHistory(await getMessages(sessionId, limit));
 }
 
 export async function listSessions(
