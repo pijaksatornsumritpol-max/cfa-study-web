@@ -161,6 +161,31 @@ async function doInit(): Promise<void> {
       reading_no INTEGER NOT NULL,
       read_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS tutor_sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      topic_code TEXT NOT NULL,
+      flashcard_id INTEGER REFERENCES flashcards(id) ON DELETE SET NULL,
+      title TEXT,
+      created_at TEXT,
+      updated_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS tutor_messages (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER REFERENCES tutor_sessions(id) ON DELETE CASCADE,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      followups TEXT,
+      model TEXT,
+      created_at TEXT
+    );
+    CREATE TABLE IF NOT EXISTS tutor_notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      topic_code TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      source TEXT,
+      created_at TEXT
+    );
   `);
 
   // Seed the 10 topics if missing. INSERT OR IGNORE keeps this idempotent and
@@ -866,3 +891,7 @@ export async function totalReadingsCount(): Promise<number> {
   const r = await client.execute("SELECT COUNT(*) AS n FROM notes");
   return num(r.rows[0]?.n);
 }
+
+// Exported for src/lib/tutor-db.ts, which owns the tutor queries so this file
+// (already ~750 lines across cards, questions, notes and exams) does not grow further.
+export { client, str, nowLocalISO };
