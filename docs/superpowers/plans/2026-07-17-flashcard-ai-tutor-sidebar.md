@@ -557,7 +557,7 @@ import { ensureInit } from "@/lib/db";
 import {
   addMessage,
   createSession,
-  getMessages,
+  getHistoryForClaude,
   getTutorContext,
 } from "@/lib/tutor-db";
 import { parseRelated, renderContextBlock, TUTOR_SYSTEM } from "@/lib/tutor";
@@ -592,13 +592,16 @@ export async function POST(request: Request) {
   const ctx = await getTutorContext(cardId);
   if (!ctx) return Response.json({ error: "Card not found." }, { status: 404 });
 
-  // First turn of a session carries the card + stats block; later turns don't
-  // (it is already in the conversation history — re-sending it wastes tokens).
-  const isNew = !sessionId;
+  // Every turn carries the card + stats block. It is NOT enough to send it only
+  // on the first turn: addMessage persists the raw `message`, not `userContent`,
+  // so the rendered block never enters the stored history — the tutor would
+  // forget the card from turn 2 onward, exactly when the student taps a chip.
+  // ~150 tokens/turn against max_tokens 700 is the right trade.
   const sid = sessionId ?? (await createSession(ctx.topicCode, cardId, message));
-  const history = isNew ? [] : await getMessages(sid, 8);
-  const userContent = isNew ? renderContextBlock(ctx, message) : message;
+  const history = sessionId ? await getHistoryForClaude(sid, 8) : [];
+  const userContent = renderContextBlock(ctx, message);
 
+  // Raw text, so the archive shows what the student actually typed.
   await addMessage(sid, "user", message);
 
   const model = process.env.ANTHROPIC_MODEL || "claude-haiku-4-5";

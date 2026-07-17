@@ -160,14 +160,25 @@ Tags: ...
 [QUESTION] <student's question>
 ```
 
-Sent on the **first** user message of a session only. Later turns send just the question —
-the block stays in the conversation history, so re-sending it wastes tokens.
+Sent on **every** user message of a session.
+
+An earlier draft sent it only on the first turn, reasoning that it would persist in the
+conversation history. Code review proved that false: the archive stores the student's raw
+question, not the rendered block, so history rebuilt from the database never contains it —
+the tutor would forget the card from turn 2 onward, exactly when the student taps a chip.
+Re-rendering costs ~150 tokens/turn against `max_tokens` 700 and also survives the
+8-message window.
 
 ## Prompt
 
 The persona is constant, so it goes in `system` with `cache_control: { type: "ephemeral" }`,
-exactly as `explainQuestion` already does. The card block varies per card and therefore goes
-in the user message, where it cannot invalidate the system cache.
+matching what `explainQuestion` already does. The card block varies per card and goes in the
+user message.
+
+Note the `cache_control` breakpoint is convention here, not a saving: `TUTOR_SYSTEM` is
+roughly 220 tokens, well under the API's minimum cacheable prefix, so it will never produce
+a cache hit. It is kept for consistency with the existing call and in case the prompt grows.
+Do not claim a caching benefit from it without checking `usage.cache_read_input_tokens`.
 
 ```
 You are a CFA Level 1 tutor.
