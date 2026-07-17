@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
-import { browseNotes, finishReading, getReadTodayKeys, notesOverview, searchNotes } from "@/app/actions";
+import { browseNotes, finishReading, getReadTodayKeys, getTutorNotes, notesOverview, searchNotes } from "@/app/actions";
 import { btnSecondary, PageTitle, TopicSelect } from "@/components/ui";
 import { CODE_TO_NAME, TOPIC_CODES } from "@/lib/topics";
 import type { Note } from "@/lib/db";
@@ -11,6 +11,9 @@ export default function NotesPage() {
   const [overview, setOverview] = useState<Record<string, number> | null>(null);
   const [topic, setTopic] = useState<string>("");
   const [notes, setNotes] = useState<Note[] | null>(null);
+  const [tutorNotes, setTutorNotes] = useState<
+    { id: number; title: string; body: string; source: string; created_at: string }[]
+  >([]);
   const [openId, setOpenId] = useState<number | null>(null);
   const [readKeys, setReadKeys] = useState<Set<string>>(new Set());
 
@@ -66,6 +69,9 @@ export default function NotesPage() {
         if (n.length) setOpenId(n[0].id); // open the first reading by default
       })
       .catch(() => setNotes([]));
+    getTutorNotes(topic)
+      .then(setTutorNotes)
+      .catch(() => setTutorNotes([]));
   }, [topic]);
 
   useEffect(() => {
@@ -197,6 +203,26 @@ export default function NotesPage() {
                 />
               ))}
             </div>
+          )}
+
+          {tutorNotes.length > 0 && (
+            <section className="mt-8">
+              <h3 className="mb-2 text-sm font-semibold text-slate-500">🤖 From the tutor</h3>
+              <ul className="space-y-3">
+                {tutorNotes.map((n) => (
+                  <li key={n.id} className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-4">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-semibold text-slate-900">{n.title}</span>
+                      <span className="rounded-full bg-white px-2 py-0.5 text-[10px] uppercase text-indigo-600">
+                        {n.source}
+                      </span>
+                    </div>
+                    <div className="mt-1 whitespace-pre-wrap text-sm text-slate-700">{n.body}</div>
+                    <div className="mt-2 text-xs text-slate-400">{n.created_at}</div>
+                  </li>
+                ))}
+              </ul>
+            </section>
           )}
         </>
       )}
