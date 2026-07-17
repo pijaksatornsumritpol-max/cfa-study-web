@@ -1,5 +1,6 @@
 // Tutor persistence. Kept out of db.ts, which is already large.
 import "server-only";
+import type { InValue } from "@libsql/client";
 import { client, str, nowLocalISO, countsByTopic } from "./db";
 import type { TutorContext } from "./tutor";
 
@@ -19,6 +20,15 @@ export interface TutorSessionSummary {
   title: string;
   updated_at: string;
   messages: number;
+}
+
+export interface TutorNote {
+  id: number;
+  topic_code: string;
+  title: string;
+  body: string;
+  source: "answer" | "summary";
+  created_at: string;
 }
 
 /** Card + SRS weak-point context for the first message of a session. */
@@ -79,16 +89,23 @@ export async function addMessage(
   model = "",
 ): Promise<number> {
   const now = nowLocalISO();
-  const r = await client.execute({
-    sql: `INSERT INTO tutor_messages (session_id, role, content, followups, model, created_at)
-          VALUES (?,?,?,?,?,?)`,
-    args: [sessionId, role, content, JSON.stringify(followups), model, now],
-  });
-  await client.execute({
-    sql: "UPDATE tutor_sessions SET updated_at=? WHERE id=?",
-    args: [now, sessionId],
-  });
-  return Number(r.lastInsertRowid);
+  // One round trip, atomically: batch is the house idiom in db.ts. It also closes
+  // the window where a message exists with a stale session updated_at.
+  const rs = await client.batch(
+    [
+      {
+        sql: `INSERT INTO tutor_messages (session_id, role, content, followups, model, created_at)
+              VALUES (?,?,?,?,?,?)`,
+        args: [sessionId, role, content, JSON.stringify(followups), model, now],
+      },
+      {
+        sql: "UPDATE tutor_sessions SET updated_at=? WHERE id=?",
+        args: [now, sessionId],
+      },
+    ],
+    "write",
+  );
+  return Number(rs[0].lastInsertRowid);
 }
 
 /** Oldest-first. `limit` caps how much history we send to Claude. */
@@ -109,13 +126,33 @@ export async function getMessages(sessionId: number, limit = 8): Promise<TutorMe
     .reverse();
 }
 
-export async function listSessions(topicCode?: string | null): Promise<TutorSessionSummary[]> {
+/**
+ * History for the Anthropic Messages API. Trims the window to a valid prefix:
+ * a failed turn leaves an unpaired trailing user message, and a window boundary
+ * can leave a leading assistant — either shape is a 400 from the API.
+ */
+export async function getHistoryForClaude(
+  sessionId: number,
+  limit = 8,
+): Promise<TutorMessage[]> {
+  const rows = await getMessages(sessionId, limit);
+  while (rows.length && rows[rows.length - 1].role === "user") rows.pop();
+  while (rows.length && rows[0].role === "assistant") rows.shift();
+  return rows;
+}
+
+export async function listSessions(
+  topicCode?: string | null,
+  limit = 50,
+): Promise<TutorSessionSummary[]> {
   const where = topicCode ? "WHERE s.topic_code = ?" : "";
+  const args: InValue[] = topicCode ? [topicCode] : [];
+  args.push(Math.trunc(limit));
   const r = await client.execute({
     sql: `SELECT s.id, s.topic_code, s.title, s.updated_at,
                  (SELECT COUNT(*) FROM tutor_messages m WHERE m.session_id = s.id) AS messages
-          FROM tutor_sessions s ${where} ORDER BY s.updated_at DESC, s.id DESC LIMIT 50`,
-    args: topicCode ? [topicCode] : [],
+          FROM tutor_sessions s ${where} ORDER BY s.updated_at DESC, s.id DESC LIMIT ?`,
+    args,
   });
   return r.rows.map((row) => ({
     id: num(row.id),
@@ -129,9 +166,15 @@ export async function listSessions(topicCode?: string | null): Promise<TutorSess
 export async function getMessageWithTopic(
   messageId: number,
 ): Promise<{ content: string; topic_code: string; title: string } | null> {
+  // Title with the question that actually produced this answer — s.title is frozen
+  // from the session's first question, so it would mislabel every later answer.
+  // Falls back to the session title when no preceding user message exists.
   const r = await client.execute({
-    sql: `SELECT m.content, s.topic_code, s.title FROM tutor_messages m
-          JOIN tutor_sessions s ON s.id = m.session_id WHERE m.id = ?`,
+    sql: `SELECT m.content, s.topic_code,
+                 COALESCE((SELECT p.content FROM tutor_messages p
+                           WHERE p.session_id = m.session_id AND p.id < m.id AND p.role = 'user'
+                           ORDER BY p.id DESC LIMIT 1), s.title) AS title
+          FROM tutor_messages m JOIN tutor_sessions s ON s.id = m.session_id WHERE m.id = ?`,
     args: [messageId],
   });
   if (!r.rows.length) return null;
@@ -155,7 +198,7 @@ export async function saveTutorNote(
   return Number(r.lastInsertRowid);
 }
 
-export async function listTutorNotes(topicCode: string) {
+export async function listTutorNotes(topicCode: string): Promise<TutorNote[]> {
   const r = await client.execute({
     sql: `SELECT id, topic_code, title, body, source, created_at FROM tutor_notes
           WHERE topic_code=? ORDER BY id DESC`,
@@ -166,7 +209,7 @@ export async function listTutorNotes(topicCode: string) {
     topic_code: str(row.topic_code),
     title: str(row.title),
     body: str(row.body),
-    source: str(row.source),
+    source: str(row.source) as "answer" | "summary",
     created_at: str(row.created_at),
   }));
 }
