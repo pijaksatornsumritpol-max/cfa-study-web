@@ -43,6 +43,24 @@ test("parseRelated: bold markdown footer -> delimiters stripped, no garbage chip
   assert.deepEqual(r.followups, ["One?", "Two?", "Three?"]);
 });
 
+test("parseRelated: list-item italic label -> footer stripped from body, 3 chips", () => {
+  const r = parseRelated("Body.\n- _Related_: One? | Two? | Three?");
+  assert.equal(r.body, "Body.");
+  assert.deepEqual(r.followups, ["One?", "Two?", "Three?"]);
+});
+
+test("parseRelated: blockquoted label -> footer stripped from body, 3 chips", () => {
+  const r = parseRelated("Body.\n> Related: One? | Two? | Three?");
+  assert.equal(r.body, "Body.");
+  assert.deepEqual(r.followups, ["One?", "Two?", "Three?"]);
+});
+
+test("parseRelated: italic label with trailing underscore -> 3 chips", () => {
+  const r = parseRelated("Body.\n_Related:_ One? | Two? | Three?");
+  assert.equal(r.body, "Body.");
+  assert.deepEqual(r.followups, ["One?", "Two?", "Three?"]);
+});
+
 test("parseRelated: per-item markdown emphasis stripped from chips", () => {
   const r = parseRelated("Body.\nRelated: **One?** | _Two?_ | Three?");
   assert.deepEqual(r.followups, ["One?", "Two?", "Three?"]);
