@@ -22,6 +22,7 @@ export function TutorHistory({ topicCode, onBack }: { topicCode: string; onBack:
   const [picked, setPicked] = useState<number[]>([]);
   const [open, setOpen] = useState<Msg[] | null>(null);
   const [status, setStatus] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     listTutorSessions(topicCode).then(setRows).catch(() => setRows([]));
@@ -32,9 +33,13 @@ export function TutorHistory({ topicCode, onBack }: { topicCode: string; onBack:
   }
 
   async function summarise() {
+    if (saving) return;
+    setSaving(true);
     setStatus("Summarising…");
     const r = await summariseSessionsToNote(picked);
     setStatus(r.ok ? "✓ Saved to Notes" : (r.error ?? "Failed."));
+    if (r.ok) setPicked([]);
+    setSaving(false);
   }
 
   if (open) {
@@ -79,7 +84,7 @@ export function TutorHistory({ topicCode, onBack }: { topicCode: string; onBack:
                 aria-label={`Select ${s.title}`}
               />
               <button
-                onClick={() => getTutorSession(s.id).then(setOpen)}
+                onClick={() => getTutorSession(s.id).then(setOpen).catch(() => setStatus("Couldn’t open that chat."))}
                 className="flex-1 text-left"
               >
                 <div className="line-clamp-2 text-sm text-slate-800">{s.title}</div>
@@ -93,7 +98,7 @@ export function TutorHistory({ topicCode, onBack }: { topicCode: string; onBack:
       )}
 
       {picked.length > 0 && (
-        <button onClick={summarise} className="mt-4 w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white">
+        <button onClick={summarise} disabled={saving} className="mt-4 w-full rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-50">
           📝 Summarise {picked.length} chat{picked.length > 1 ? "s" : ""} into a note
         </button>
       )}
