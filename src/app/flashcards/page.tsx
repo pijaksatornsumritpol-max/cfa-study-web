@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { getDueCards, reviewCard } from "@/app/actions";
 import { btnSecondary, PageTitle, TopicSelect } from "@/components/ui";
+import { TutorSidebar } from "@/components/TutorSidebar";
 import { celebrate } from "@/lib/confetti";
 import { intervalPreview, QUALITY, type Rating } from "@/lib/srs";
 import { CODE_TO_NAME, TOPIC_CODES } from "@/lib/topics";
@@ -20,6 +21,7 @@ export default function FlashcardsPage() {
   const [queue, setQueue] = useState<Flashcard[] | null>(null);
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [tutorOpen, setTutorOpen] = useState(false);
 
   // Deep link: pre-select the topic from a ?topic= query param (e.g. from Notes).
   useEffect(() => {
@@ -95,6 +97,12 @@ export default function FlashcardsPage() {
           {card.tags && (
             <div className="mt-2 text-xs text-slate-400">🏷 {card.tags}</div>
           )}
+          <button
+            onClick={() => setTutorOpen(true)}
+            className="mt-4 inline-flex items-center gap-1 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-semibold text-indigo-700 hover:bg-indigo-100"
+          >
+            🤖 Ask about this card
+          </button>
 
           {!show ? (
             <button
@@ -113,6 +121,8 @@ export default function FlashcardsPage() {
           )}
         </div>
       )}
+
+      {tutorOpen && card && <TutorSidebar card={card} onClose={() => setTutorOpen(false)} />}
     </>
   );
 }
