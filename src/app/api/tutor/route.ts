@@ -53,7 +53,21 @@ export async function POST(request: Request) {
 
   const stream = new ReadableStream({
     async start(controller) {
-      controller.enqueue(line({ t: "start", sessionId: sid }));
+      // The student can close the tab mid-answer. If the runtime propagates that
+      // as a stream cancel, every later enqueue throws — including the one in the
+      // catch below, which would then escape start() as an unhandled rejection.
+      // Latch it once and no-op afterwards so the error paths stay safe.
+      let alive = true;
+      const send = (o: unknown) => {
+        if (!alive) return;
+        try {
+          controller.enqueue(line(o));
+        } catch {
+          alive = false;
+        }
+      };
+
+      send({ t: "start", sessionId: sid });
 
       let full = "";
       try {
@@ -80,9 +94,7 @@ export async function POST(request: Request) {
 
         if (!res.ok || !res.body) {
           const detail = (await res.text()).slice(0, 200);
-          controller.enqueue(
-            line({ t: "error", message: `Claude request failed (${res.status}). ${detail}` }),
-          );
+          send({ t: "error", message: `Claude request failed (${res.status}). ${detail}` });
           // No close() here: the `finally` below owns the single close. Closing
           // twice throws "Controller is already closed" out of start().
           return;
@@ -111,7 +123,7 @@ export async function POST(request: Request) {
               if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta") {
                 const text = evt.delta.text ?? "";
                 full += text;
-                controller.enqueue(line({ t: "delta", v: text }));
+                send({ t: "delta", v: text });
               }
             } catch {
               // ignore keep-alives / partial frames
@@ -120,16 +132,23 @@ export async function POST(request: Request) {
         }
 
         // Persist only a cleanly finished answer, so the archive never holds
-        // a truncated one.
+        // a truncated one. This still runs when the client has gone away: the
+        // upstream read loop drains to completion, so `full` is the whole answer,
+        // and the archive gets it. A turn that dies mid-read persists nothing and
+        // leaves an unpaired trailing `user`, which toValidHistory absorbs.
         const { body, followups } = parseRelated(full);
         const messageId = await addMessage(sid, "assistant", body, followups, model);
-        controller.enqueue(line({ t: "done", messageId, followups }));
+        send({ t: "done", messageId, followups });
       } catch (e) {
-        controller.enqueue(
-          line({ t: "error", message: "Could not reach Claude. " + String(e).slice(0, 150) }),
-        );
+        send({ t: "error", message: "Could not reach Claude. " + String(e).slice(0, 150) });
       } finally {
-        controller.close();
+        // Sole owner of close(). Guarded: closing an already-closed or errored
+        // controller (client gone) throws.
+        try {
+          controller.close();
+        } catch {
+          // already closed / cancelled — nothing to do
+        }
       }
     },
   });
