@@ -84,6 +84,14 @@ export function TutorSidebar({ card, onClose }: { card: Flashcard; onClose: () =
     } catch (e) {
       setError(String(e instanceof Error ? e.message : e));
       setInput(q); // keep the question so Retry is one click
+      setMsgs((m) => {
+        // this attempt appended [user, assistant("")] and the assistant never got content
+        const last = m[m.length - 1];
+        if (last && last.role === "assistant" && last.content === "" && !last.id) {
+          return m.slice(0, -2);
+        }
+        return m;
+      });
     } finally {
       setBusy(false);
     }
@@ -130,9 +138,9 @@ export function TutorSidebar({ card, onClose }: { card: Flashcard; onClose: () =
                 <button onClick={() => save(m.id!)} className={btnSecondary}>
                   {saved === m.id ? "✓ Saved" : "💾 Save to note"}
                 </button>
-                {(m.followups ?? []).map((f) => (
+                {(m.followups ?? []).map((f, fi) => (
                   <button
-                    key={f}
+                    key={`${m.id}-${fi}`}
                     onClick={() => ask(f)}
                     className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1 text-xs text-indigo-700 hover:bg-indigo-100"
                   >
