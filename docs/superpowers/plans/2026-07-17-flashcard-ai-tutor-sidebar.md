@@ -37,7 +37,8 @@
 | `src/lib/db.ts` (modify) | Add 3 tables to `doInit()`; export `client`, `str` and `nowLocalISO` so `tutor-db.ts` can reuse them. |
 | `src/lib/tutor-db.ts` (create) | All tutor queries. `server-only`. |
 | `src/app/api/tutor/route.ts` (create) | The only streaming path. POST → NDJSON stream. |
-| `src/app/actions.ts` (modify) | Non-streaming tutor actions + export `callClaude` for reuse. |
+| `src/app/actions.ts` (modify) | Non-streaming tutor actions. Imports `callClaude` from `@/lib/claude` — never re-export it, this is a `"use server"` file and exports become public endpoints. |
+| `src/lib/claude.ts` (create) | `callClaude`, moved out of the `"use server"` file so it is not a public RPC endpoint. `server-only`. |
 | `src/components/TutorSidebar.tsx` (create) | Sidebar UI: messages, chips, input, Save-to-note. |
 | `src/components/TutorHistory.tsx` (create) | Archive list + multi-select + Summarise. |
 | `src/app/flashcards/page.tsx` (modify) | "Ask about this card" button + mount sidebar. |
@@ -538,15 +539,17 @@ Run: `sed -n '395,445p' node_modules/next/dist/docs/01-app/03-api-reference/03-f
 Expected: shows `new ReadableStream({ async pull(controller) {...} })` returned via `new Response(stream)`.
 This plan's handler uses that shape. If the installed docs disagree, follow the docs, not this plan.
 
-- [ ] **Step 2: Export `callClaude` from actions.ts for reuse**
+- [ ] **Step 2: Move `callClaude` into `src/lib/claude.ts`**
 
-In `src/app/actions.ts`, change the declaration (currently `async function callClaude(`) to:
+> **Amended during execution.** The original step said "export `callClaude` from `actions.ts`".
+> That is unsafe: `actions.ts` is a `"use server"` file, so **every export becomes a public RPC
+> endpoint**. Exporting `callClaude` would publish an unauthenticated relay to Anthropic on the
+> app's own domain, with `(key, model, userContent, system, maxTokens)` fully caller-controlled.
 
-```ts
-export async function callClaude(
-```
-
-Leave its body untouched — the tutor route uses it only for the non-streaming summariser.
+Create `src/lib/claude.ts` — a plain module, **no `"use server"`**, with `import "server-only";`
+so it can never reach a client bundle. Move `callClaude` there verbatim (same signature, same
+body). In `src/app/actions.ts`, delete the local copy and import it from `@/lib/claude` so
+`explainQuestion` keeps working. Leave `callGemini` private in `actions.ts` — nothing else needs it.
 
 - [ ] **Step 3: Write the route handler**
 
@@ -743,6 +746,7 @@ Append to `src/app/actions.ts`:
 
 ```ts
 // ---------------------------------------------------------------- AI tutor
+import { callClaude } from "@/lib/claude";
 import {
   listSessions,
   getMessages,
