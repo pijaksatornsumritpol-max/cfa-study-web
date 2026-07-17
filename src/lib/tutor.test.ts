@@ -10,7 +10,19 @@ test("parseRelated: well-formed footer -> body without the line + 3 chips", () =
 
 test("parseRelated: bracketed footer -> brackets stripped", () => {
   const r = parseRelated("Body.\nRelated: [One?, Two?, Three?]");
+  assert.equal(r.body, "Body.");
   assert.deepEqual(r.followups, ["One?", "Two?", "Three?"]);
+});
+
+test("parseRelated: bold markdown footer -> delimiters stripped, no garbage chip", () => {
+  const r = parseRelated("Body.\n**Related:** One?, Two?, Three?");
+  assert.equal(r.body, "Body.");
+  assert.deepEqual(r.followups, ["One?", "Two?", "Three?"]);
+});
+
+test("parseRelated: never returns more than 3 chips", () => {
+  const r = parseRelated("Body.\nRelated: If ease drops, what happens?, Two?, Three?");
+  assert.equal(r.followups.length, 3);
 });
 
 test("parseRelated: no footer -> text unchanged, zero chips", () => {
@@ -46,4 +58,12 @@ test("renderContextBlock: zero attempts -> no division by zero", () => {
   const s = renderContextBlock({ ...ctx, topicAttempts: 0, topicCorrect: 0 }, "Hi");
   assert.match(s, /no attempts yet/);
   assert.doesNotMatch(s, /NaN/);
+});
+
+test("renderContextBlock: empty tags -> Tags line omitted", () => {
+  assert.doesNotMatch(renderContextBlock({ ...ctx, tags: "" }, "Hi"), /Tags:/);
+});
+
+test("renderContextBlock: whole-number ease renders with 2 decimals", () => {
+  assert.match(renderContextBlock({ ...ctx, ease: 2.5 }, "Hi"), /ease 2\.50/);
 });

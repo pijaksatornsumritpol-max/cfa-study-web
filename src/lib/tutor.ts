@@ -27,19 +27,24 @@ export const TUTOR_SYSTEM = `You are a CFA Level 1 tutor.
 At the very end of every response add exactly one line (no text after it):
 Related: [3 drill-down questions to ask next — comma-separated, each under 12 words]`;
 
-const RELATED_RE = /^\s*\**\s*related\s*:\s*(.*)$/i;
+// Tolerates markdown drift around the footer label: "Related:", "**Related:**",
+// "- _Related_:" etc. Anything left over degrades to zero chips, never a bad one.
+const RELATED_RE = /^\s*[*_>\-\s]*related\s*[*_]*\s*:\s*(.*)$/i;
+const MAX_FOLLOWUPS = 3;
 
 export function parseRelated(text: string): { body: string; followups: string[] } {
   const lines = text.trimEnd().split("\n");
   const m = RELATED_RE.exec(lines[lines.length - 1] ?? "");
   if (!m) return { body: text.trim(), followups: [] };
 
-  let rest = m[1].trim();
+  // A closing "**" from a bolded label lands at the head of the capture group.
+  let rest = m[1].trim().replace(/^[*_]+/, "").trim();
   if (rest.startsWith("[") && rest.endsWith("]")) rest = rest.slice(1, -1);
   const followups = rest
     .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+    .map((s) => s.trim().replace(/^\*+|\*+$/g, "").trim())
+    .filter(Boolean)
+    .slice(0, MAX_FOLLOWUPS);
 
   return { body: lines.slice(0, -1).join("\n").trim(), followups };
 }
