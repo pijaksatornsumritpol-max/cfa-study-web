@@ -315,7 +315,7 @@ export async function explainQuestion(
   return { error: result.error };
 }
 
-async function callClaude(
+export async function callClaude(
   key: string,
   model: string,
   userContent: string,
