@@ -18,6 +18,8 @@ import {
   deleteFlashcard,
   deleteQuestion,
   dueFlashcards,
+  flashcardsByDifficulty,
+  flashcardDifficultyCounts,
   ensureInit,
   examHistory,
   saveExamAttempt,
@@ -260,6 +262,23 @@ export async function sendTestPush(): Promise<{
 export async function getDueCards(code?: string | null): Promise<Flashcard[]> {
   await ensureInit();
   return dueFlashcards(code ?? null);
+}
+
+/** Cards filtered by how you last rated them: "hard" (Again/Hard) or "easy" (Good/Easy). */
+export async function getFlashcardsByDifficulty(
+  code: string | null,
+  difficulty: "hard" | "easy",
+): Promise<Flashcard[]> {
+  await ensureInit();
+  return flashcardsByDifficulty(code ?? null, difficulty);
+}
+
+/** Counts for the flashcard difficulty filter (due / hard / easy). */
+export async function getFlashcardDifficultyCounts(
+  code: string | null,
+): Promise<{ due: number; hard: number; easy: number }> {
+  await ensureInit();
+  return flashcardDifficultyCounts(code ?? null);
 }
 
 export async function reviewCard(cardId: number, quality: number): Promise<void> {

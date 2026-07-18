@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { getDueCards, reviewCard } from "@/app/actions";
+import { getDueCards, getFlashcardDifficultyCounts, getFlashcardsByDifficulty, reviewCard } from "@/app/actions";
 import { btnSecondary, PageTitle, TopicSelect } from "@/components/ui";
 import { TutorSidebar } from "@/components/TutorSidebar";
 import { celebrate } from "@/lib/confetti";
@@ -18,6 +18,8 @@ const BUTTONS: { rating: Rating; label: string; cls: string }[] = [
 
 export default function FlashcardsPage() {
   const [topic, setTopic] = useState("ALL");
+  const [mode, setMode] = useState<"due" | "hard" | "easy">("due");
+  const [counts, setCounts] = useState<{ due: number; hard: number; easy: number } | null>(null);
   const [queue, setQueue] = useState<Flashcard[] | null>(null);
   const [show, setShow] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -29,17 +31,26 @@ export default function FlashcardsPage() {
     if (t && TOPIC_CODES.includes(t.toUpperCase())) setTopic(t.toUpperCase());
   }, []);
 
+  const refreshCounts = useCallback(() => {
+    getFlashcardDifficultyCounts(topic === "ALL" ? null : topic)
+      .then(setCounts)
+      .catch(() => setCounts(null));
+  }, [topic]);
+
   const load = useCallback(() => {
     setQueue(null);
     setShow(false);
-    getDueCards(topic === "ALL" ? null : topic)
-      .then(setQueue)
-      .catch(() => setQueue([]));
-  }, [topic]);
+    const c = topic === "ALL" ? null : topic;
+    const p = mode === "due" ? getDueCards(c) : getFlashcardsByDifficulty(c, mode);
+    p.then(setQueue).catch(() => setQueue([]));
+  }, [topic, mode]);
 
   useEffect(() => {
     load();
   }, [load]);
+  useEffect(() => {
+    refreshCounts();
+  }, [refreshCounts]);
 
   const card = queue && queue.length > 0 ? queue[0] : null;
 
@@ -54,7 +65,8 @@ export default function FlashcardsPage() {
     }
     setQueue((q) => (q ? q.slice(1) : q));
     setShow(false);
-    if (wasLast) celebrate(); // cleared the due queue 🎉
+    refreshCounts();
+    if (wasLast) celebrate(); // cleared the queue 🎉
   }
 
   return (
@@ -68,6 +80,33 @@ export default function FlashcardsPage() {
           </label>
           <TopicSelect value={topic} onChange={setTopic} />
         </div>
+        <div>
+          <label className="mb-1 block text-xs font-medium text-slate-500">
+            Review pool
+          </label>
+          <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+            {(
+              [
+                ["due", "Due", counts?.due],
+                ["hard", "😬 Hard", counts?.hard],
+                ["easy", "😎 Easy", counts?.easy],
+              ] as const
+            ).map(([m, label, n]) => (
+              <button
+                key={m}
+                onClick={() => setMode(m)}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  mode === m
+                    ? "bg-white text-indigo-700 shadow-sm"
+                    : "text-slate-500 hover:text-slate-700"
+                }`}
+              >
+                {label}
+                {n !== undefined ? ` (${n})` : ""}
+              </button>
+            ))}
+          </div>
+        </div>
         <button onClick={load} className={btnSecondary}>
           🔄 Rebuild queue
         </button>
@@ -77,14 +116,17 @@ export default function FlashcardsPage() {
         <div className="h-56 animate-pulse rounded-xl bg-slate-200" />
       ) : !card ? (
         <div className="rounded-xl border border-emerald-100 bg-emerald-50 p-6 text-sm text-slate-700">
-          🎉 No cards due right now for this filter. Come back later, or add more in
-          Manage.
+          {mode === "due"
+            ? "🎉 No cards due right now for this filter. Come back later, or add more in Manage."
+            : mode === "hard"
+              ? "No cards rated Hard/Again yet. Review some cards and tap 😬 Hard or ❌ Again — they'll show up here so you can drill just the tough ones."
+              : "No cards rated Good/Easy yet. Rate some cards 🙂 Good or 😎 Easy and they'll appear here."}
         </div>
       ) : (
         <div className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm">
           <div className="mb-4 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-slate-500">
             <span className="rounded-full bg-slate-100 px-2 py-0.5 font-medium text-slate-600">
-              {queue.length} due
+              {queue.length} {mode === "due" ? "due" : mode}
             </span>
             <span>
               {card.topic_code} — {CODE_TO_NAME[card.topic_code]}

@@ -304,6 +304,63 @@ export async function allCards(code?: string | null): Promise<Flashcard[]> {
   return r.rows.map(mapCard);
 }
 
+// Cards whose MOST RECENT review rated them hard (quality<=3 = Again/Hard) or
+// easy (quality>=4 = Good/Easy) — regardless of due date. Powers the "review by
+// difficulty" filter so you can drill only the cards you find hard.
+export async function flashcardsByDifficulty(
+  code: string | null,
+  difficulty: "hard" | "easy",
+  limit = 200,
+): Promise<Flashcard[]> {
+  const cmp = difficulty === "hard" ? "<= 3" : ">= 4";
+  let sql = `SELECT f.*, t.code AS topic_code FROM flashcards f
+             JOIN topics t ON f.topic_id = t.id
+             JOIN (SELECT flashcard_id, MAX(id) AS last_id FROM reviews GROUP BY flashcard_id) L
+               ON f.id = L.flashcard_id
+             JOIN reviews rv ON rv.id = L.last_id
+             WHERE rv.quality ${cmp}`;
+  const args: InValue[] = [];
+  if (code) {
+    sql += " AND t.code = ?";
+    args.push(code.trim().toUpperCase());
+  }
+  sql +=
+    difficulty === "hard"
+      ? " ORDER BY rv.quality ASC, f.ease ASC, RANDOM()"
+      : " ORDER BY RANDOM()";
+  if (limit && Number.isFinite(limit)) sql += ` LIMIT ${Math.trunc(limit)}`;
+  const r = await client.execute({ sql, args });
+  return r.rows.map(mapCard);
+}
+
+/** Counts for the flashcard difficulty filter (due / hard / easy) for a topic (or all). */
+export async function flashcardDifficultyCounts(
+  code?: string | null,
+): Promise<{ due: number; hard: number; easy: number }> {
+  const today = todayISO();
+  const topicClause = code ? " AND t.code = ?" : "";
+  const cArg: InValue[] = code ? [code.trim().toUpperCase()] : [];
+  const lastQ = `SELECT COUNT(*) AS n FROM flashcards f
+                 JOIN topics t ON f.topic_id = t.id
+                 JOIN (SELECT flashcard_id, MAX(id) AS last_id FROM reviews GROUP BY flashcard_id) L
+                   ON f.id = L.flashcard_id
+                 JOIN reviews rv ON rv.id = L.last_id
+                 WHERE rv.quality __CMP__${topicClause}`;
+  const [due, hard, easy] = await client.batch(
+    [
+      {
+        sql: `SELECT COUNT(*) AS n FROM flashcards f JOIN topics t ON f.topic_id = t.id
+              WHERE (f.due_date IS NULL OR f.due_date <= ?)${topicClause}`,
+        args: [today, ...cArg],
+      },
+      { sql: lastQ.replace("__CMP__", "<= 3"), args: [...cArg] },
+      { sql: lastQ.replace("__CMP__", ">= 4"), args: [...cArg] },
+    ],
+    "read",
+  );
+  return { due: num(due.rows[0]?.n), hard: num(hard.rows[0]?.n), easy: num(easy.rows[0]?.n) };
+}
+
 export async function getFlashcardState(
   cardId: number,
 ): Promise<{ ease: number; interval: number; reps: number } | null> {
