@@ -190,7 +190,8 @@ async function doInit(): Promise<void> {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       topic_code TEXT NOT NULL,
       seq INTEGER,
-      content TEXT NOT NULL
+      content TEXT NOT NULL,
+      source TEXT DEFAULT 'curriculum'
     );
     CREATE INDEX IF NOT EXISTS idx_curriculum_topic ON curriculum_chunks(topic_code);
   `);
@@ -201,6 +202,13 @@ async function doInit(): Promise<void> {
   const tsCols = await client.execute("PRAGMA table_info(tutor_sessions)");
   if (!tsCols.rows.some((r) => String(r.name) === "note_id")) {
     await client.execute("ALTER TABLE tutor_sessions ADD COLUMN note_id INTEGER");
+  }
+
+  // Migration: curriculum_chunks.source marks each RAG chunk's origin ('curriculum'
+  // vs 'schweser') so a source can be rebuilt/removed independently. Guard on PRAGMA.
+  const ccCols = await client.execute("PRAGMA table_info(curriculum_chunks)");
+  if (!ccCols.rows.some((r) => String(r.name) === "source")) {
+    await client.execute("ALTER TABLE curriculum_chunks ADD COLUMN source TEXT DEFAULT 'curriculum'");
   }
 
   // Seed the 10 topics if missing. INSERT OR IGNORE keeps this idempotent and
