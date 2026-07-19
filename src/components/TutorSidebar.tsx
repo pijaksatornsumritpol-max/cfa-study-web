@@ -31,6 +31,22 @@ export function TutorSidebar({
   onClose: () => void;
 }) {
   const topicCode = card ? card.topic_code : note!.topic_code;
+  // Starter questions for the empty state, so the student isn't staring at a blank
+  // box wondering what to ask. Tapping one just calls ask() like a follow-up chip.
+  const starters = card
+    ? [
+        "Why is this true?",
+        "Explain it more simply",
+        "Give me an example",
+        "How is this tested on the exam?",
+      ]
+    : [
+        "Explain this reading in simple terms",
+        "What's most likely to be tested here?",
+        "Give me a worked numerical example",
+        "Quiz me on this reading",
+        "What are the common traps or mistakes?",
+      ];
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -151,11 +167,27 @@ export function TutorSidebar({
         <>
           <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
             {msgs.length === 0 && (
-              <p className="text-sm text-slate-500">
-                {card
-                  ? "Ask anything about this card. The tutor can see your reps, ease and how often you missed it."
-                  : "Ask anything about this reading — the tutor has studied the whole CFA curriculum and can go deeper than the note. Tap a follow-up to keep digging."}
-              </p>
+              <div className="space-y-3">
+                <p className="text-sm text-slate-500">
+                  {card
+                    ? "Ask anything about this card. The tutor can see your reps, ease and how often you missed it."
+                    : "Ask anything about this reading — the tutor has studied the whole CFA curriculum and can go deeper than the note."}
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {starters.map((s) => (
+                    <button
+                      key={s}
+                      onClick={() => ask(s)}
+                      className="rounded-full border border-indigo-200 bg-indigo-50 px-3 py-1.5 text-xs font-medium text-indigo-700 hover:bg-indigo-100"
+                    >
+                      {s}
+                    </button>
+                  ))}
+                </div>
+                <p className="text-xs text-slate-400">
+                  Tap a starter, or type your own question below.
+                </p>
+              </div>
             )}
             {msgs.map((m, i) => (
               <div key={i}>
