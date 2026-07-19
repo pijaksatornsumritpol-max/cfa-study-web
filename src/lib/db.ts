@@ -186,6 +186,13 @@ async function doInit(): Promise<void> {
       source TEXT,
       created_at TEXT
     );
+    CREATE TABLE IF NOT EXISTS curriculum_chunks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      topic_code TEXT NOT NULL,
+      seq INTEGER,
+      content TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_curriculum_topic ON curriculum_chunks(topic_code);
   `);
 
   // Migration: note-based tutor chats. tutor_sessions.note_id links a session to

@@ -292,3 +292,96 @@ function safeJson(s: string): string[] {
     return [];
   }
 }
+
+// ---------------------------------------------------------------- curriculum RAG
+// Retrieval over the student's own official CFA curriculum text (chunked into
+// curriculum_chunks). Keyword + phrase scoring, no embeddings / no extra API —
+// grounds the tutor in the actual book, not just the short summary note.
+const RAG_STOP = new Set(
+  "the a an of to in on for and or is are be as by with from that this these those it its into at we you your they their which such than then when where how what why can may will would each other more most less any all not no using use used does do how are what compute calculate explain describe difference build state give me my".split(
+    " ",
+  ),
+);
+function ragWords(s: string): string[] {
+  return (s.toLowerCase().match(/[a-z][a-z-]{2,}/g) || []).filter((w) => !RAG_STOP.has(w));
+}
+function ragPhrases(strings: string[]): string[] {
+  const out = new Set<string>();
+  for (const strv of strings) {
+    const w = ragWords(strv);
+    for (let i = 0; i < w.length; i++) {
+      if (i + 1 < w.length) out.add(w[i] + " " + w[i + 1]);
+      if (i + 2 < w.length) out.add(w[i] + " " + w[i + 1] + " " + w[i + 2]);
+    }
+  }
+  return [...out];
+}
+function ragKeywords(strings: string[]): string[] {
+  return [...new Set(strings.flatMap(ragWords))].sort((a, b) => b.length - a.length).slice(0, 8);
+}
+function ragScore(content: string, phrases: string[], kws: string[]): number {
+  const lc = content.toLowerCase();
+  let s = 0;
+  for (const p of phrases) if (lc.includes(p)) s += p.split(" ").length >= 3 ? 9 : 4;
+  for (const w of kws) {
+    const occ = lc.split(w).length - 1;
+    if (occ) s += 1 + Math.min(occ, 3) * 0.4;
+  }
+  // Down-weight table-of-contents / number-list chunks (page-number heavy).
+  const digits = (content.match(/\d/g) || []).length;
+  if (digits / content.length > 0.06) s *= 0.35;
+  return s;
+}
+
+/**
+ * Top curriculum excerpts for a tutor turn. `subject` (the note title or card
+ * front) pins the reading; `question` is what the student asked. Runs one
+ * density-ordered query per salient term so a large topic can't bury the exact
+ * chunk under a LIMIT. Returns [] gracefully when the corpus isn't loaded.
+ */
+export async function retrieveCurriculum(
+  topicCode: string,
+  subject: string,
+  question: string,
+  k = 3,
+): Promise<string[]> {
+  const phrases = ragPhrases([subject, question]);
+  const kws = ragKeywords([subject, question]);
+  const terms = [...new Set([...phrases, ...kws])]
+    .sort((a, b) => b.split(" ").length - a.split(" ").length || b.length - a.length)
+    .slice(0, 6);
+  if (!terms.length) return [];
+
+  let results;
+  try {
+    results = await Promise.all(
+      terms.map((term) =>
+        client.execute({
+          sql: `SELECT content FROM curriculum_chunks WHERE topic_code=? AND lower(content) LIKE ?
+                ORDER BY (length(content) - length(replace(lower(content), ?, ''))) DESC LIMIT 12`,
+          args: [topicCode, `%${term}%`, term],
+        }),
+      ),
+    );
+  } catch {
+    return []; // table missing on a fresh DB, etc. — tutor still works without it
+  }
+
+  const seen = new Set<string>();
+  const cand: string[] = [];
+  for (const r of results) {
+    for (const row of r.rows) {
+      const ct = str(row.content);
+      if (ct && !seen.has(ct)) {
+        seen.add(ct);
+        cand.push(ct);
+      }
+    }
+  }
+  return cand
+    .map((content) => ({ content, s: ragScore(content, phrases, kws) }))
+    .filter((x) => x.s > 0)
+    .sort((a, b) => b.s - a.s)
+    .slice(0, k)
+    .map((x) => x.content.slice(0, 1100).trim());
+}

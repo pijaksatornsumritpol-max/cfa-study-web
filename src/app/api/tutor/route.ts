@@ -7,6 +7,7 @@ import {
   getNoteContext,
   getSession,
   getTutorContext,
+  retrieveCurriculum,
 } from "@/lib/tutor-db";
 import {
   NOTE_TUTOR_SYSTEM,
@@ -18,6 +19,11 @@ import {
 
 const enc = new TextEncoder();
 const line = (o: unknown) => enc.encode(JSON.stringify(o) + "\n");
+
+// Grounding block: real passages retrieved from the student's own CFA curriculum.
+const formatExcerpts = (ex: string[]) =>
+  "[CURRICULUM EXCERPTS — from your official CFA curriculum; ground your answer in these, explain in your own words]\n" +
+  ex.map((e, i) => `--- excerpt ${i + 1} ---\n${e}`).join("\n\n");
 
 export async function POST(request: Request) {
   await ensureInit();
@@ -60,19 +66,28 @@ export async function POST(request: Request) {
   let topicCode: string;
   let userContent: string;
   let systemPrompt: string;
+  let subject: string;
   if (isNote) {
     const ctx = await getNoteContext(noteId as number);
     if (!ctx) return Response.json({ error: "Reading not found." }, { status: 404 });
     topicCode = ctx.topicCode;
+    subject = ctx.title;
     userContent = renderNoteContextBlock(ctx, message);
     systemPrompt = NOTE_TUTOR_SYSTEM;
   } else {
     const ctx = await getTutorContext(cardId as number);
     if (!ctx) return Response.json({ error: "Card not found." }, { status: 404 });
     topicCode = ctx.topicCode;
+    subject = `${ctx.front} ${ctx.tags}`;
     userContent = renderContextBlock(ctx, message);
     systemPrompt = TUTOR_SYSTEM;
   }
+
+  // Ground the answer in the student's actual curriculum. Retrieval failures are
+  // swallowed inside retrieveCurriculum (returns []), so the tutor degrades to the
+  // note/card + Claude's own knowledge — never blocks the answer.
+  const excerpts = await retrieveCurriculum(topicCode, subject, message, 3);
+  if (excerpts.length) userContent += "\n\n" + formatExcerpts(excerpts);
 
   // The client latches sessionId from the `start` frame and replays it forever,
   // so a deleted session or a reset DB leaves it holding a stale id. Writing
