@@ -156,7 +156,7 @@ export default function FlashcardsPage() {
           ) : (
             <>
               <hr className="my-5 border-slate-200" />
-              <div className="whitespace-pre-wrap text-slate-700">{card.back}</div>
+              <CardBack text={card.back} />
               <hr className="my-5 border-slate-200" />
               <RatingButtons card={card} busy={busy} onRate={rate} />
             </>
@@ -194,6 +194,79 @@ function RatingButtons({
           </span>
         </button>
       ))}
+    </div>
+  );
+}
+
+// Break a card's answer into readable pieces: split on ";" and sentence
+// boundaries (but not decimals like "2.50"), keep prose flowing, and pull each
+// formula (a clause containing "=") onto its own monospace line.
+function splitClauses(block: string): string[] {
+  return block
+    .split(/\s*;\s*|(?<=[A-Za-z0-9)%\]])\.\s+(?=[A-Z(])/g)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+function renderInline(s: string, keyBase: string) {
+  return s.split(/(\*\*[^*]+\*\*)/g).map((p, i) =>
+    p.startsWith("**") && p.endsWith("**") ? (
+      <strong key={`${keyBase}-${i}`} className="font-semibold text-slate-900">
+        {p.slice(2, -2)}
+      </strong>
+    ) : (
+      <span key={`${keyBase}-${i}`}>{p}</span>
+    ),
+  );
+}
+
+function CardBack({ text }: { text: string }) {
+  const blocks = text
+    .split(/\n+/)
+    .map((b) => b.trim())
+    .filter(Boolean);
+  return (
+    <div className="space-y-3 text-[15px] leading-relaxed text-slate-700">
+      {blocks.map((block, bi) => {
+        const items: { type: "text" | "formula"; v: string }[] = [];
+        let prose: string[] = [];
+        const flush = () => {
+          if (prose.length) {
+            items.push({ type: "text", v: prose.join(". ") });
+            prose = [];
+          }
+        };
+        for (const cl of splitClauses(block)) {
+          if (cl.includes("=")) {
+            flush();
+            items.push({ type: "formula", v: cl });
+          } else {
+            prose.push(cl);
+          }
+        }
+        flush();
+        return (
+          <div key={bi} className="space-y-2">
+            {items.map((it, ii) =>
+              it.type === "formula" ? (
+                <div
+                  key={ii}
+                  className="overflow-x-auto whitespace-pre-wrap break-words rounded-md border-l-2 border-indigo-400 bg-slate-100 px-3 py-2 font-mono text-[13px] leading-relaxed text-slate-800"
+                >
+                  {it.v}
+                </div>
+              ) : (
+                <p key={ii}>
+                  {renderInline(
+                    /[.!?:]$/.test(it.v) ? it.v : it.v + ".",
+                    `${bi}-${ii}`,
+                  )}
+                </p>
+              ),
+            )}
+          </div>
+        );
+      })}
     </div>
   );
 }
