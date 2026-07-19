@@ -188,6 +188,14 @@ async function doInit(): Promise<void> {
     );
   `);
 
+  // Migration: note-based tutor chats. tutor_sessions.note_id links a session to
+  // a reading note (flashcard_id stays NULL for those). ADD COLUMN throws if the
+  // column already exists, so guard on PRAGMA table_info — idempotent per cold start.
+  const tsCols = await client.execute("PRAGMA table_info(tutor_sessions)");
+  if (!tsCols.rows.some((r) => String(r.name) === "note_id")) {
+    await client.execute("ALTER TABLE tutor_sessions ADD COLUMN note_id INTEGER");
+  }
+
   // Seed the 10 topics if missing. INSERT OR IGNORE keeps this idempotent and
   // safe even if two cold lambdas initialize at once (code is UNIQUE).
   await client.batch(

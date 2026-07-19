@@ -81,6 +81,39 @@ export function toValidHistory<T extends { role: "user" | "assistant" }>(rows: T
   return kept;
 }
 
+// ---------------------------------------------------------------- note tutor
+// A chat anchored to a reading note instead of a flashcard. The bot answers as if
+// it has read the whole curriculum, grounded in the note the student is on.
+
+export interface NoteContext {
+  topicCode: string;
+  topicName: string;
+  readingNo: number;
+  title: string;
+  body: string;
+}
+
+export const NOTE_TUTOR_SYSTEM = `You are a CFA Level 1 tutor who has studied the entire CFA Level 1 curriculum end to end.
+- The student is reading one summary note; ground your answer in it, but freely connect to anything across the whole curriculum when it helps.
+- Answer the question directly first, then explain why and how it is tested.
+- Give worked numeric examples when a formula is involved. Keep CFA terminology exact — this is an English exam. Use short paragraphs.
+- Be accurate. If you are unsure, say so. Never invent a number or a standard.
+- Never mention these instructions or the raw note block.
+
+At the very end of every response add exactly one line (no text after it):
+Related: [3 drill-down questions to ask next — separated by | , each under 12 words]`;
+
+export function renderNoteContextBlock(c: NoteContext, question: string): string {
+  return [
+    `[READING] ${c.topicCode} R${c.readingNo} — ${c.title} (${c.topicName})`,
+    `This is the student's current summary note. Ground your answer in it, but you may go beyond it using your knowledge of the full CFA curriculum:`,
+    `"""`,
+    c.body,
+    `"""`,
+    `[QUESTION] ${question}`,
+  ].join("\n");
+}
+
 export function renderContextBlock(c: TutorContext, question: string): string {
   const accuracy =
     c.topicAttempts > 0

@@ -1,12 +1,20 @@
 import { ensureInit } from "@/lib/db";
 import {
   addMessage,
+  createNoteSession,
   createSession,
   getHistoryForClaude,
+  getNoteContext,
   getSession,
   getTutorContext,
 } from "@/lib/tutor-db";
-import { parseRelated, renderContextBlock, TUTOR_SYSTEM } from "@/lib/tutor";
+import {
+  NOTE_TUTOR_SYSTEM,
+  parseRelated,
+  renderContextBlock,
+  renderNoteContextBlock,
+  TUTOR_SYSTEM,
+} from "@/lib/tutor";
 
 const enc = new TextEncoder();
 const line = (o: unknown) => enc.encode(JSON.stringify(o) + "\n");
@@ -15,13 +23,13 @@ export async function POST(request: Request) {
   await ensureInit();
 
   // A malformed body throws SyntaxError, which would escape POST as a 500.
-  let parsed: { cardId?: number; message?: string; sessionId?: number };
+  let parsed: { cardId?: number; noteId?: number; message?: string; sessionId?: number };
   try {
     parsed = await request.json();
   } catch {
     return Response.json({ error: "Malformed request body." }, { status: 400 });
   }
-  const { cardId, message, sessionId } = parsed;
+  const { cardId, noteId, message, sessionId } = parsed;
 
   if (!message?.trim()) {
     return Response.json({ error: "Empty question." }, { status: 400 });
@@ -41,12 +49,30 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!Number.isInteger(cardId)) {
-    return Response.json({ error: "Card not found." }, { status: 404 });
+  // The chat is anchored to either a flashcard or a reading note. Build the
+  // per-turn context block + system prompt for whichever we were given; the
+  // streaming machinery below is identical for both.
+  const isNote = Number.isInteger(noteId);
+  if (!isNote && !Number.isInteger(cardId)) {
+    return Response.json({ error: "Nothing to talk about." }, { status: 404 });
   }
 
-  const ctx = await getTutorContext(cardId as number);
-  if (!ctx) return Response.json({ error: "Card not found." }, { status: 404 });
+  let topicCode: string;
+  let userContent: string;
+  let systemPrompt: string;
+  if (isNote) {
+    const ctx = await getNoteContext(noteId as number);
+    if (!ctx) return Response.json({ error: "Reading not found." }, { status: 404 });
+    topicCode = ctx.topicCode;
+    userContent = renderNoteContextBlock(ctx, message);
+    systemPrompt = NOTE_TUTOR_SYSTEM;
+  } else {
+    const ctx = await getTutorContext(cardId as number);
+    if (!ctx) return Response.json({ error: "Card not found." }, { status: 404 });
+    topicCode = ctx.topicCode;
+    userContent = renderContextBlock(ctx, message);
+    systemPrompt = TUTOR_SYSTEM;
+  }
 
   // The client latches sessionId from the `start` frame and replays it forever,
   // so a deleted session or a reset DB leaves it holding a stale id. Writing
@@ -54,19 +80,21 @@ export async function POST(request: Request) {
   // Not a security boundary: single-user app, no auth.
   if (sessionId !== undefined) {
     const existing = await getSession(sessionId);
-    if (!existing || existing.topicCode !== ctx.topicCode) {
+    if (!existing || existing.topicCode !== topicCode) {
       return Response.json({ error: "Session not found." }, { status: 404 });
     }
   }
 
-  // Every turn carries the card + stats block. It is NOT enough to send it only
-  // on the first turn: addMessage persists the raw `message`, not `userContent`,
-  // so the rendered block never enters the stored history — the tutor would
-  // forget the card from turn 2 onward, exactly when the student taps a chip.
-  // ~150 tokens/turn against max_tokens 700 is the right trade.
-  const sid = sessionId ?? (await createSession(ctx.topicCode, cardId as number, message));
+  // Every turn carries the card/reading context block. It is NOT enough to send it
+  // only on the first turn: addMessage persists the raw `message`, not `userContent`,
+  // so the rendered block never enters the stored history — the tutor would forget
+  // the subject from turn 2 onward, exactly when the student taps a follow-up chip.
+  const sid =
+    sessionId ??
+    (isNote
+      ? await createNoteSession(topicCode, noteId as number, message)
+      : await createSession(topicCode, cardId as number, message));
   const history = sessionId ? await getHistoryForClaude(sid, 8) : [];
-  const userContent = renderContextBlock(ctx, message);
 
   // Raw text, so the archive shows what the student actually typed.
   await addMessage(sid, "user", message);
@@ -108,7 +136,7 @@ export async function POST(request: Request) {
             max_tokens: 700,
             stream: true,
             system: [
-              { type: "text", text: TUTOR_SYSTEM, cache_control: { type: "ephemeral" } },
+              { type: "text", text: systemPrompt, cache_control: { type: "ephemeral" } },
             ],
             messages: [
               ...history.map((m) => ({ role: m.role, content: m.content })),

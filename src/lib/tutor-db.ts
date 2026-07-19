@@ -2,7 +2,7 @@
 import "server-only";
 import type { InValue } from "@libsql/client";
 import { client, str, nowLocalISO, countsByTopic } from "./db";
-import { toValidHistory, type TutorContext } from "./tutor";
+import { toValidHistory, type TutorContext, type NoteContext } from "./tutor";
 
 const num = (v: unknown): number => (v == null ? 0 : Number(v));
 
@@ -67,6 +67,25 @@ export async function getTutorContext(cardId: number): Promise<TutorContext | nu
   };
 }
 
+/** Reading-note context for the first message of a note-anchored session. */
+export async function getNoteContext(noteId: number): Promise<NoteContext | null> {
+  const r = await client.execute({
+    sql: `SELECT n.reading_no, n.title, n.body, n.topic_code, t.name AS topic_name
+          FROM notes n LEFT JOIN topics t ON t.code = n.topic_code
+          WHERE n.id = ?`,
+    args: [noteId],
+  });
+  if (!r.rows.length) return null;
+  const row = r.rows[0];
+  return {
+    topicCode: str(row.topic_code),
+    topicName: str(row.topic_name) || str(row.topic_code),
+    readingNo: num(row.reading_no),
+    title: str(row.title),
+    body: str(row.body),
+  };
+}
+
 /**
  * Existence/ownership check for a client-supplied `sessionId`. The client latches
  * the id from the `start` frame and replays it on every later turn, so a deleted
@@ -75,15 +94,16 @@ export async function getTutorContext(cardId: number): Promise<TutorContext | nu
  */
 export async function getSession(
   sessionId: number,
-): Promise<{ topicCode: string; cardId: number } | null> {
+): Promise<{ topicCode: string; cardId: number; noteId: number } | null> {
   const r = await client.execute({
-    sql: "SELECT topic_code, flashcard_id FROM tutor_sessions WHERE id = ?",
+    sql: "SELECT topic_code, flashcard_id, note_id FROM tutor_sessions WHERE id = ?",
     args: [sessionId],
   });
   if (!r.rows.length) return null;
   return {
     topicCode: str(r.rows[0].topic_code),
     cardId: num(r.rows[0].flashcard_id),
+    noteId: num(r.rows[0].note_id),
   };
 }
 
@@ -97,6 +117,21 @@ export async function createSession(
     sql: `INSERT INTO tutor_sessions (topic_code, flashcard_id, title, created_at, updated_at)
           VALUES (?,?,?,?,?)`,
     args: [topicCode, cardId, title.slice(0, 120), now, now],
+  });
+  return Number(r.lastInsertRowid);
+}
+
+/** A note-anchored session: flashcard_id stays NULL, note_id points at the reading. */
+export async function createNoteSession(
+  topicCode: string,
+  noteId: number,
+  title: string,
+): Promise<number> {
+  const now = nowLocalISO();
+  const r = await client.execute({
+    sql: `INSERT INTO tutor_sessions (topic_code, flashcard_id, note_id, title, created_at, updated_at)
+          VALUES (?, NULL, ?, ?, ?, ?)`,
+    args: [topicCode, noteId, title.slice(0, 120), now, now],
   });
   return Number(r.lastInsertRowid);
 }

@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useCallback, useEffect, useState } from "react";
 import { browseNotes, finishReading, getReadTodayKeys, getTutorNotes, notesOverview, searchNotes } from "@/app/actions";
 import { btnSecondary, PageTitle, TopicSelect } from "@/components/ui";
+import { TutorSidebar } from "@/components/TutorSidebar";
 import { CODE_TO_NAME, TOPIC_CODES } from "@/lib/topics";
 import type { Note } from "@/lib/db";
 
@@ -16,6 +17,7 @@ export default function NotesPage() {
   >([]);
   const [openId, setOpenId] = useState<number | null>(null);
   const [readKeys, setReadKeys] = useState<Set<string>>(new Set());
+  const [tutorNote, setTutorNote] = useState<Note | null>(null);
 
   const refreshRead = useCallback(() => {
     getReadTodayKeys()
@@ -141,6 +143,7 @@ export default function NotesPage() {
           setOpenId={setOpenId}
           readKeys={readKeys}
           onToggleRead={toggleRead}
+          onAsk={setTutorNote}
         />
       ) : (
         /* ---------------- BROWSE MODE ---------------- */
@@ -200,6 +203,7 @@ export default function NotesPage() {
                   onToggle={() => setOpenId((id) => (id === n.id ? null : n.id))}
                   read={readKeys.has(`${n.topic_code}-${n.reading_no}`)}
                   onToggleRead={() => toggleRead(n)}
+                  onAsk={() => setTutorNote(n)}
                 />
               ))}
             </div>
@@ -226,6 +230,18 @@ export default function NotesPage() {
           )}
         </>
       )}
+
+      {tutorNote && (
+        <TutorSidebar
+          note={{
+            id: tutorNote.id,
+            topic_code: tutorNote.topic_code,
+            reading_no: tutorNote.reading_no,
+            title: tutorNote.title,
+          }}
+          onClose={() => setTutorNote(null)}
+        />
+      )}
     </>
   );
 }
@@ -238,6 +254,7 @@ function SearchResults({
   setOpenId,
   readKeys,
   onToggleRead,
+  onAsk,
 }: {
   query: string;
   results: Note[] | null;
@@ -246,6 +263,7 @@ function SearchResults({
   setOpenId: (fn: (id: number | null) => number | null) => void;
   readKeys: Set<string>;
   onToggleRead: (note: Note) => void;
+  onAsk: (note: Note) => void;
 }) {
   if (searching && results === null) {
     return <div className="h-40 animate-pulse rounded-xl bg-slate-200" />;
@@ -273,6 +291,7 @@ function SearchResults({
             showTopic
             read={readKeys.has(`${n.topic_code}-${n.reading_no}`)}
             onToggleRead={() => onToggleRead(n)}
+            onAsk={() => onAsk(n)}
           />
         ))}
       </div>
@@ -288,6 +307,7 @@ function NoteCard({
   showTopic,
   read,
   onToggleRead,
+  onAsk,
 }: {
   note: Note;
   open: boolean;
@@ -296,6 +316,7 @@ function NoteCard({
   showTopic?: boolean;
   read?: boolean;
   onToggleRead?: () => void;
+  onAsk?: () => void;
 }) {
   return (
     <div className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
@@ -321,23 +342,35 @@ function NoteCard({
       {open && (
         <div className="border-t border-slate-100 px-5 py-4">
           <NoteBody body={note.body} />
-          {onToggleRead && (
+          {(onToggleRead || onAsk) && (
             <div className="mt-4 flex flex-wrap items-center gap-3 border-t border-slate-100 pt-4">
-              <button
-                onClick={onToggleRead}
-                className={
-                  read
-                    ? "inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
-                    : "inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-violet-700"
-                }
-              >
-                {read ? "✓ Read today" : "Finished reading"}
-              </button>
-              <span className="text-xs text-slate-400">
-                {read
-                  ? "Logged in today's reading — tap to undo."
-                  : "Mark as read to log what you read today."}
-              </span>
+              {onToggleRead && (
+                <button
+                  onClick={onToggleRead}
+                  className={
+                    read
+                      ? "inline-flex items-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3.5 py-2 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
+                      : "inline-flex items-center gap-1.5 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-semibold text-white hover:bg-violet-700"
+                  }
+                >
+                  {read ? "✓ Read today" : "Finished reading"}
+                </button>
+              )}
+              {onAsk && (
+                <button
+                  onClick={onAsk}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-3.5 py-2 text-sm font-semibold text-indigo-700 hover:bg-indigo-100"
+                >
+                  🤖 Ask the tutor
+                </button>
+              )}
+              {onToggleRead && (
+                <span className="text-xs text-slate-400">
+                  {read
+                    ? "Logged in today's reading — tap to undo."
+                    : "Mark as read to log what you read today."}
+                </span>
+              )}
             </div>
           )}
         </div>

@@ -13,7 +13,24 @@ interface Msg {
   followups?: string[];
 }
 
-export function TutorSidebar({ card, onClose }: { card: Flashcard; onClose: () => void }) {
+/** The reading a note-anchored chat is about (a subset of the Note row). */
+export interface NoteSubject {
+  id: number;
+  topic_code: string;
+  reading_no: number;
+  title: string;
+}
+
+export function TutorSidebar({
+  card,
+  note,
+  onClose,
+}: {
+  card?: Flashcard;
+  note?: NoteSubject;
+  onClose: () => void;
+}) {
+  const topicCode = card ? card.topic_code : note!.topic_code;
   const [msgs, setMsgs] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
@@ -34,7 +51,11 @@ export function TutorSidebar({ card, onClose }: { card: Flashcard; onClose: () =
       const res = await fetch("/api/tutor", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ cardId: card.id, message: q, sessionId: sessionId.current }),
+        body: JSON.stringify(
+          card
+            ? { cardId: card.id, message: q, sessionId: sessionId.current }
+            : { noteId: note!.id, message: q, sessionId: sessionId.current },
+        ),
       });
       if (!res.ok || !res.body) {
         const j = (await res.json().catch(() => ({}))) as { error?: string };
@@ -110,7 +131,9 @@ export function TutorSidebar({ card, onClose }: { card: Flashcard; onClose: () =
       <header className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
         <div>
           <div className="text-sm font-semibold text-slate-900">🤖 Ask the tutor</div>
-          <div className="text-xs text-slate-500">{card.topic_code}</div>
+          <div className="text-xs text-slate-500">
+            {card ? topicCode : `${topicCode} · R${note!.reading_no} — ${note!.title}`}
+          </div>
         </div>
         <div className="flex gap-2">
           <button onClick={() => setShowHistory((v) => !v)} className={btnSecondary}>
@@ -123,14 +146,15 @@ export function TutorSidebar({ card, onClose }: { card: Flashcard; onClose: () =
       </header>
 
       {showHistory ? (
-        <TutorHistory topicCode={card.topic_code} onBack={() => setShowHistory(false)} />
+        <TutorHistory topicCode={topicCode} onBack={() => setShowHistory(false)} />
       ) : (
         <>
           <div className="flex-1 space-y-4 overflow-y-auto px-4 py-4">
             {msgs.length === 0 && (
               <p className="text-sm text-slate-500">
-                Ask anything about this card. The tutor can see your reps, ease and how often you
-                missed it.
+                {card
+                  ? "Ask anything about this card. The tutor can see your reps, ease and how often you missed it."
+                  : "Ask anything about this reading — the tutor has studied the whole CFA curriculum and can go deeper than the note. Tap a follow-up to keep digging."}
               </p>
             )}
             {msgs.map((m, i) => (
