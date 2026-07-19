@@ -20,10 +20,17 @@ import {
 const enc = new TextEncoder();
 const line = (o: unknown) => enc.encode(JSON.stringify(o) + "\n");
 
-// Grounding block: real passages retrieved from the student's own CFA curriculum.
-const formatExcerpts = (ex: string[]) =>
-  "[CURRICULUM EXCERPTS — from your official CFA curriculum; ground your answer in these, explain in your own words]\n" +
-  ex.map((e, i) => `--- excerpt ${i + 1} ---\n${e}`).join("\n\n");
+// Grounding block: real passages retrieved from the student's own study materials,
+// each labeled with its source so the tutor can attribute a point when useful.
+const SRC_LABEL: Record<string, string> = {
+  curriculum: "Official CFA curriculum",
+  schweser: "Schweser Study Notes",
+};
+const formatExcerpts = (ex: { content: string; source: string }[]) =>
+  "[REFERENCE EXCERPTS — from the student's own study materials; ground your answer in these and explain in your own words. Each is labeled with its source; when you rely on one, you may briefly cite the source.]\n" +
+  ex
+    .map((e, i) => `--- excerpt ${i + 1} [${SRC_LABEL[e.source] ?? e.source}] ---\n${e.content}`)
+    .join("\n\n");
 
 export async function POST(request: Request) {
   await ensureInit();

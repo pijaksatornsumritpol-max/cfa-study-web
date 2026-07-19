@@ -344,7 +344,7 @@ export async function retrieveCurriculum(
   subject: string,
   question: string,
   k = 3,
-): Promise<string[]> {
+): Promise<{ content: string; source: string }[]> {
   const phrases = ragPhrases([subject, question]);
   const kws = ragKeywords([subject, question]);
   const terms = [...new Set([...phrases, ...kws])]
@@ -357,7 +357,7 @@ export async function retrieveCurriculum(
     results = await Promise.all(
       terms.map((term) =>
         client.execute({
-          sql: `SELECT content FROM curriculum_chunks WHERE topic_code=? AND lower(content) LIKE ?
+          sql: `SELECT content, source FROM curriculum_chunks WHERE topic_code=? AND lower(content) LIKE ?
                 ORDER BY (length(content) - length(replace(lower(content), ?, ''))) DESC LIMIT 12`,
           args: [topicCode, `%${term}%`, term],
         }),
@@ -368,20 +368,20 @@ export async function retrieveCurriculum(
   }
 
   const seen = new Set<string>();
-  const cand: string[] = [];
+  const cand: { content: string; source: string }[] = [];
   for (const r of results) {
     for (const row of r.rows) {
       const ct = str(row.content);
       if (ct && !seen.has(ct)) {
         seen.add(ct);
-        cand.push(ct);
+        cand.push({ content: ct, source: str(row.source) || "curriculum" });
       }
     }
   }
   return cand
-    .map((content) => ({ content, s: ragScore(content, phrases, kws) }))
+    .map((x) => ({ ...x, s: ragScore(x.content, phrases, kws) }))
     .filter((x) => x.s > 0)
     .sort((a, b) => b.s - a.s)
     .slice(0, k)
-    .map((x) => x.content.slice(0, 1100).trim());
+    .map((x) => ({ content: x.content.slice(0, 1100).trim(), source: x.source }));
 }

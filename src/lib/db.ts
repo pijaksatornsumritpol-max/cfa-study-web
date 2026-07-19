@@ -974,4 +974,13 @@ export async function totalReadingsCount(): Promise<number> {
 
 // Exported for src/lib/tutor-db.ts, which owns the tutor queries so this file
 // (already ~750 lines across cards, questions, notes and exams) does not grow further.
+/** Topic code for a question — used to scope RAG retrieval when explaining it. */
+export async function topicCodeForQuestion(questionId: number): Promise<string | null> {
+  const r = await client.execute({
+    sql: "SELECT t.code FROM questions q JOIN topics t ON t.id = q.topic_id WHERE q.id = ?",
+    args: [questionId],
+  });
+  return r.rows.length ? str(r.rows[0].code) : null;
+}
+
 export { client, str, nowLocalISO };

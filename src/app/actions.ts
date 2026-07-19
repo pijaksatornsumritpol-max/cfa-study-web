@@ -45,6 +45,7 @@ import {
   totalReadingsCount,
   setSettingsRaw,
   todayISO,
+  topicCodeForQuestion,
   updateCardSchedule,
 } from "@/lib/db";
 import type { ExamAttempt, Note } from "@/lib/db";
@@ -56,6 +57,7 @@ import {
   saveTutorNote,
   listTutorNotes,
   transcriptFor,
+  retrieveCurriculum,
 } from "@/lib/tutor-db";
 import {
   pushConfigured,
@@ -302,7 +304,7 @@ export async function reviewCard(cardId: number, quality: number): Promise<void>
 // (it silently won't cache). The real cost-saver is the DB result cache below:
 // each question is explained by the API at most once, then served from SQLite.
 const EXPLAIN_SYSTEM =
-  "You are a CFA Level 1 tutor. In 3-5 sentences of plain English, explain why the correct answer is right and briefly why each other option is wrong. Focus on the underlying CFA concept. Do not restate the question.";
+  "You are a CFA Level 1 tutor. In 3-5 sentences of plain English, explain why the correct answer is right and briefly why each other option is wrong. Focus on the underlying CFA concept. Do not restate the question. If reference excerpts from the student's CFA study materials are provided, ground your explanation in them (be precise with definitions, formulas, and thresholds) and ignore any OCR artifacts — but explain in your own words, never copy passages verbatim.";
 
 export async function explainQuestion(
   questionId: number,
@@ -316,10 +318,22 @@ export async function explainQuestion(
   const hit = await getExplanation(questionId);
   if (hit) return { text: hit.text, cached: true };
 
-  // 2. Chosen-agnostic user prompt (so the cache key is just the question).
-  const userContent = `Question: ${stem}\nA) ${choices.a}\nB) ${choices.b}\nC) ${choices.c}\nCorrect answer: ${correct}`;
+  // 2. Ground the explanation in the student's own study materials (curriculum +
+  // Schweser), the same RAG corpus the tutor uses. Scope to the question's topic;
+  // retrieveCurriculum fails soft to [] so a missing corpus never blocks the answer.
+  const topic = await topicCodeForQuestion(questionId);
+  const excerpts = topic
+    ? await retrieveCurriculum(topic, stem, `Why is answer ${correct} correct?`, 3)
+    : [];
+  const grounding = excerpts.length
+    ? "\n\nReference excerpts from the student's CFA study materials (ground the explanation in these):\n" +
+      excerpts.map((e, i) => `[${i + 1}] ${e.content}`).join("\n")
+    : "";
 
-  // 3. Call a provider: Claude (preferred) → Gemini → none configured.
+  // 3. Chosen-agnostic user prompt (so the cache key is just the question).
+  const userContent = `Question: ${stem}\nA) ${choices.a}\nB) ${choices.b}\nC) ${choices.c}\nCorrect answer: ${correct}${grounding}`;
+
+  // 4. Call a provider: Claude (preferred) → Gemini → none configured.
   let result: { text?: string; error?: string };
   let model: string;
   if (process.env.ANTHROPIC_API_KEY) {
@@ -335,7 +349,7 @@ export async function explainQuestion(
     };
   }
 
-  // 4. Persist on success so the next request for this question is free.
+  // 5. Persist on success so the next request for this question is free.
   if (result.text) {
     await saveExplanation(questionId, result.text, model);
     return { text: result.text, cached: false };
